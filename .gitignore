@@ -1,0 +1,7 @@
+.idea/**
+.venv/**
+build/**
+dist/**
+temp_/**
+dmg_temp/**
+.DS_Store

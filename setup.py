@@ -1,3 +1,6 @@
+import sys
+sys.setrecursionlimit(5000)
+
 from setuptools import setup
 
 APP = ['app.py']
@@ -16,7 +19,7 @@ OPTIONS = {
         'NSMicrophoneUsageDescription':
             'Write Less needs microphone access to record and transcribe your speech.',
         'NSAccessibilityUsageDescription':
-            'Write Less needs accessibility access for the global Cmd+Shift+R hotkey.',
+            'Write Less needs accessibility access for the global Cmd+Option+F8 hotkey.',
     },
 }
 

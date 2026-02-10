@@ -5,3 +5,4 @@ numpy
 rumps
 pynput
 py2app
+setuptools<78
