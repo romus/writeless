@@ -1,0 +1,7 @@
+openai-whisper
+sounddevice
+scipy
+numpy
+rumps
+pynput
+py2app
