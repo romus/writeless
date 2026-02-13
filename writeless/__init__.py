@@ -1,0 +1,2 @@
+"""Write Less package."""
+

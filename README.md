@@ -1,11 +1,11 @@
 # Write Less
 
 Voice-to-text macOS menubar app powered by OpenAI Whisper. Record speech with a global hotkey and get instant
-transcription - all processed locally on your machine.
+transcription copied straight to your clipboard - all processed locally on your machine.
 
 ## Requirements
 
-- macOS 12+
+- macOS 26+
 - Python 3.14+
 
 ## Run from source
@@ -30,8 +30,10 @@ move `Write Less.app` to your Applications folder.
 
 - The app lives in the menubar (no Dock icon)
 - **Cmd+Option+F8** - start/stop recording
-- After recording stops, Whisper transcribes the audio and shows the result in a window
+- If recording stalls with no incoming audio, it auto-stops after 10-25 seconds
+- After recording stops, Whisper transcribes the audio and copies the result to the clipboard
 - The Whisper model (~461 MB) is downloaded automatically on first use
+- Menubar icon indicates state: 🎤 idle, 🎙️ recording, ⚙️ processing, ⬇️ downloading model
 
 ## Permissions
 
@@ -41,8 +43,10 @@ macOS will prompt for:
 - **Accessibility** - required for the global hotkey
 - **Input Monitoring** - recommended for reliable global hotkey capture
 
-If hotkeys do not respond, open menubar menu:
+Permission status is shown in the menubar menu with OK/MISSING indicators. If hotkeys do not respond, use the menu items to troubleshoot:
 
-- **Show Hotkey Diagnostics**
+- **Diagnostics** - hotkey and system diagnostics
+- **Show Audio Diagnostics** - audio device probing
 - **Open Accessibility Settings**
 - **Open Input Monitoring Settings**
+- **Open Notification Settings**

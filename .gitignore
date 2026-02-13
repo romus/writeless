@@ -5,3 +5,6 @@ dist/**
 temp_/**
 dmg_temp/**
 .DS_Store
+
+__pycache__/**
+writeless/__pycache__/**
