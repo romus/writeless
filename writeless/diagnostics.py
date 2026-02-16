@@ -1,9 +1,14 @@
-"""Audio device diagnostics and signal probe helpers."""
+"""Audio device diagnostics, signal probe helpers, and diagnostics text formatting."""
 
+import os
+import sys
 from dataclasses import dataclass
 
 import numpy as np
 import sounddevice as sd
+
+from writeless.constants import HOTKEY_LABEL
+from writeless.system_services import get_notification_status, get_permission_status
 
 
 @dataclass(frozen=True)
@@ -31,21 +36,8 @@ class AudioProbeResult:
 def get_audio_device_status() -> AudioDeviceStatus:
     """Return default input audio device details."""
     try:
-        default_device = sd.default.device
-        input_index = None
-        if isinstance(default_device, (list, tuple)) and default_device:
-            input_index = default_device[0]
-        elif isinstance(default_device, int):
-            input_index = default_device
-
-        if input_index is None:
-            return AudioDeviceStatus(None, None, None, None, None)
-
-        input_index = int(input_index)
-        if input_index < 0:
-            return AudioDeviceStatus(None, None, None, None, None)
-
-        device_info = sd.query_devices(input_index, "input")
+        device_info = sd.query_devices(kind="input")
+        input_index = int(device_info["index"])
         return AudioDeviceStatus(
             default_input_index=input_index,
             default_input_name=str(device_info.get("name", "Unknown")),
@@ -118,3 +110,58 @@ def probe_audio_input(duration_sec: float = 2.0, samplerate: int = 16000, channe
         error=None,
     )
 
+
+def format_diagnostics_text(
+    ssl_verification_enabled: bool,
+    model_loaded: bool,
+    model_name: str = "small",
+) -> str:
+    """Gather system info and return formatted diagnostics text."""
+    status = get_permission_status()
+    notif_status = get_notification_status()
+
+    bundle_id = "N/A"
+    try:
+        from Foundation import NSBundle
+        bundle = NSBundle.mainBundle()
+        if bundle:
+            bundle_id = bundle.bundleIdentifier() or "None"
+    except Exception:
+        pass
+
+    cache_dir = os.path.expanduser("~/.cache/whisper")
+    model_file = os.path.join(cache_dir, f"{model_name}.pt")
+    model_path = model_file if os.path.exists(model_file) else None
+
+    device = get_audio_device_status()
+    input_device = device.default_input_name or "None"
+
+    acc = "OK" if status.accessibility else "MISSING"
+    inp = "OK" if status.input_monitoring else "MISSING"
+    notif_label = "OK" if notif_status == "authorized" else f"MISSING ({notif_status})"
+    model_status = "yes" if model_path else "no"
+    model_mem = "yes" if model_loaded else "no"
+
+    lines = [
+        "— App —",
+        f"  Process:    {os.path.basename(sys.executable)}",
+        f"  Bundle ID:  {bundle_id}",
+        f"  Executable: {sys.executable}",
+        "",
+        "— Audio —",
+        f"  Input Device: {input_device}",
+        f"  Hotkey:       {HOTKEY_LABEL}",
+        "",
+        "— Permissions —",
+        f"  Accessibility:    {acc}",
+        f"  Input Monitoring: {inp}",
+        f"  Notifications:    {notif_label}",
+        "",
+        "— Whisper —",
+        f"  Model:      {model_name} (downloaded: {model_status}, loaded: {model_mem})",
+        f"  Model path: {model_path or 'N/A'}",
+        "",
+        "— Network —",
+        f"  SSL verification: {'On' if ssl_verification_enabled else 'Off'}",
+    ]
+    return "\n".join(lines)

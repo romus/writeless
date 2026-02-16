@@ -10,6 +10,8 @@ _SETTINGS_FILE = os.path.join(_SETTINGS_DIR, "settings.json")
 
 _DEFAULTS = {
     "notifications_enabled": True,
+    "ssl_verification_enabled": True,
+    "hotkey": "<cmd>+<alt>+<f8>",
 }
 
 

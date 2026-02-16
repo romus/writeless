@@ -1,34 +1,13 @@
-"""Menubar application implementation."""
+"""Menubar application — thin orchestrator."""
 
-import os
-import sys
-import threading
-import time
-
-import numpy as np
 import rumps
-import sounddevice as sd
-import whisper
 
-from writeless.audio_diagnostics import (
-    AudioProbeResult,
-    get_audio_device_status,
-    probe_audio_input,
-)
-from writeless.constants import (
-    DOWNLOADING_ICON,
-    HOTKEY,
-    HOTKEY_LABEL,
-    IDLE_ICON,
-    PROCESSING_ICON,
-    RECORDING_START_TIMEOUT_SEC,
-    RECORDING_STALL_TIMEOUT_SEC,
-    RECORDING_ICON,
-    SAMPLE_RATE,
-)
+from writeless.constants import IDLE_ICON
+from writeless.diagnostics import format_diagnostics_text
+from writeless.hotkey_utils import pynput_to_display, pynput_to_ns_key_equivalent
+from writeless.recorder import Recorder, configure_ssl_verification
 from writeless.settings import get as get_setting, set as set_setting
 from writeless.system_services import (
-    copy_to_clipboard,
     get_notification_status,
     get_permission_status,
     notify_user,
@@ -39,17 +18,55 @@ from writeless.system_services import (
 )
 
 
-class SayLessApp(rumps.App):
+class WriteLessApp(rumps.App):
     def __init__(self):
         super().__init__("Write Less", icon=None, title=IDLE_ICON)
+
+        self.ssl_verification_enabled = get_setting("ssl_verification_enabled")
+        configure_ssl_verification(self.ssl_verification_enabled)
         set_app_icon()
         request_notification_permission()
         self.notifications_enabled = get_setting("notifications_enabled")
-        notif_state = "On" if self.notifications_enabled else "Off"
-        self.notifications_item = rumps.MenuItem(
-            f"Notifications: {notif_state}",
-            callback=self.toggle_notifications,
+        self.current_hotkey = get_setting("hotkey")
+
+        self.recorder = Recorder(
+            on_status_change=self._set_status,
+            on_notify=self._notify,
+            on_recording_stopped=self._on_recording_stopped,
+            dispatch_to_main=self._dispatch_to_main,
         )
+        self.recorder.ssl_verification_enabled = self.ssl_verification_enabled
+
+        self.hotkey_listener = None
+        self._settings_window = None
+        self._build_menu()
+
+        self.permission_refresh_timer = rumps.Timer(self._refresh_permission_menu, 3.0)
+        self._refresh_permission_menu()
+
+    # -- internal wiring -----------------------------------------------------
+
+    def _set_status(self, icon: str) -> None:
+        self.title = icon
+
+    def _notify(self, message: str) -> None:
+        notify_user(message, self.notifications_enabled)
+
+    def _on_recording_stopped(self) -> None:
+        self.record_item.title = "Record"
+
+    @staticmethod
+    def _dispatch_to_main(fn) -> None:
+        try:
+            from PyObjCTools import AppHelper
+
+            AppHelper.callAfter(fn)
+        except Exception:
+            fn()
+
+    # -- menu ----------------------------------------------------------------
+
+    def _build_menu(self) -> None:
         self.permissions_item = rumps.MenuItem("Permissions: Checking...")
         self.accessibility_settings_item = rumps.MenuItem(
             "Open Accessibility Settings",
@@ -63,28 +80,30 @@ class SayLessApp(rumps.App):
             "Open Notification Settings",
             callback=self.open_notification_settings,
         )
+        self.record_item = rumps.MenuItem("Record", callback=self.toggle_recording)
+        self._update_record_key_equivalent()
         self.menu = [
-            rumps.MenuItem("Record", callback=self.toggle_recording),
-            self.notifications_item,
+            self.record_item,
+            rumps.MenuItem("Settings…", callback=self.open_settings),
             self.permissions_item,
             None,  # separator
             rumps.MenuItem("Diagnostics", callback=self.show_diagnostics),
-            rumps.MenuItem("Show Audio Diagnostics", callback=self.show_audio_diagnostics),
             self.accessibility_settings_item,
             self.input_monitoring_settings_item,
             self.notification_settings_item,
         ]
-        self.recording = False
-        self.audio_frames: list[np.ndarray] = []
-        self.stream: sd.InputStream | None = None
-        self._recording_session = 0
-        self._recording_lock = threading.Lock()
-        self._received_audio_frame = False
-        self._last_audio_frame_at = 0.0
-        self.model = None  # lazy-loaded
-        self.hotkey_listener = None
-        self.permission_refresh_timer = rumps.Timer(self._refresh_permission_menu, 3.0)
-        self._refresh_permission_menu()
+
+    def _update_record_key_equivalent(self) -> None:
+        """Update the Record menu item to show the current hotkey shortcut."""
+        try:
+            key_char, mask = pynput_to_ns_key_equivalent(self.current_hotkey)
+            ns_item = self.record_item._menuitem
+            ns_item.setKeyEquivalent_(key_char)
+            ns_item.setKeyEquivalentModifierMask_(mask)
+        except Exception:
+            pass
+
+    # -- permissions ---------------------------------------------------------
 
     def _set_menu_item_visible(self, item: rumps.MenuItem, visible: bool) -> None:
         """Best-effort visibility toggle for a menu item."""
@@ -104,9 +123,16 @@ class SayLessApp(rumps.App):
             item.title = ""
 
     def _refresh_permission_menu(self, _sender=None):
-        status = get_permission_status()
-        notif_status = get_notification_status()
+        import threading
 
+        def _check():
+            status = get_permission_status()
+            notif_status = get_notification_status()
+            self._dispatch_to_main(lambda: self._apply_permission_menu(status, notif_status))
+
+        threading.Thread(target=_check, daemon=True).start()
+
+    def _apply_permission_menu(self, status, notif_status):
         if status.accessibility is False:
             self._set_menu_item_visible(self.accessibility_settings_item, True)
             self.accessibility_settings_item.title = (
@@ -152,282 +178,60 @@ class SayLessApp(rumps.App):
         else:
             self.permissions_item.title = "Permissions: Unknown"
 
-    def _model_download_required(self, model_name: str) -> bool:
-        """Return True if Whisper model file is not present in local cache."""
-        try:
-            model_url = whisper._MODELS.get(model_name)  # type: ignore[attr-defined]
-            if not model_url:
-                return False
-            model_file = os.path.basename(model_url)
-            cache_dir = os.path.expanduser("~/.cache/whisper")
-            return not os.path.exists(os.path.join(cache_dir, model_file))
-        except Exception:
-            return False
-
-    def toggle_notifications(self, _sender=None):
-        self.notifications_enabled = not self.notifications_enabled
-        set_setting("notifications_enabled", self.notifications_enabled)
-        state = "On" if self.notifications_enabled else "Off"
-        self.notifications_item.title = f"Notifications: {state}"
-
-    # -- recording -----------------------------------------------------------
+    # -- callbacks -----------------------------------------------------------
 
     def toggle_recording(self, sender=None):
-        if self.recording:
-            self._stop_recording()
+        if self.recorder.is_recording:
+            self.recorder.stop()
         else:
-            self._start_recording()
+            self.record_item.title = "Stop"
+            self.recorder.start()
 
-    def _start_recording(self):
-        self.audio_frames = []
-        self.recording = True
-        self._recording_session += 1
-        session_id = self._recording_session
-        self._received_audio_frame = False
-        self._last_audio_frame_at = time.monotonic()
-        self.title = RECORDING_ICON
-        self.menu["Record"].title = "Stop"
+    def open_settings(self, _sender=None):
+        from writeless.settings_window import SettingsWindow
 
-        def audio_callback(indata, frames, time_info, status):
-            del frames, time_info, status
-            with self._recording_lock:
-                self.audio_frames.append(indata.copy())
-                self._received_audio_frame = True
-                self._last_audio_frame_at = time.monotonic()
-
-        try:
-            self.stream = sd.InputStream(
-                samplerate=SAMPLE_RATE,
-                channels=1,
-                dtype="float32",
-                callback=audio_callback,
+        if self._settings_window is None:
+            self._settings_window = SettingsWindow(
+                current_hotkey=self.current_hotkey,
+                notifications_enabled=self.notifications_enabled,
+                ssl_verification_enabled=self.ssl_verification_enabled,
+                on_hotkey_change=self._on_hotkey_change,
+                on_notifications_change=self._on_notifications_change,
+                on_ssl_change=self._on_ssl_change,
             )
-            self.stream.start()
-        except Exception as exc:
-            self.recording = False
-            self.stream = None
-            self.title = IDLE_ICON
-            self.menu["Record"].title = "Record"
-            notify_user(f"Failed to start recording: {exc}", self.notifications_enabled)
-            return
-
-        threading.Thread(
-            target=self._recording_watchdog_loop,
-            args=(session_id,),
-            daemon=True,
-        ).start()
-
-    def _recording_watchdog_loop(self, session_id: int):
-        while True:
-            time.sleep(0.5)
-            if not self.recording or self._recording_session != session_id:
-                return
-
-            with self._recording_lock:
-                received_audio_frame = self._received_audio_frame
-                last_frame_at = self._last_audio_frame_at
-
-            timeout_sec = (
-                RECORDING_STALL_TIMEOUT_SEC
-                if received_audio_frame
-                else RECORDING_START_TIMEOUT_SEC
-            )
-            if time.monotonic() - last_frame_at < timeout_sec:
-                continue
-
-            self._stop_recording_on_main_thread(
-                timeout_reached=True,
-                timeout_seconds=timeout_sec,
-            )
-            return
-
-    def _stop_recording_on_main_thread(
-        self,
-        timeout_reached: bool = False,
-        timeout_seconds: int | None = None,
-    ):
-        def stop():
-            if not self.recording:
-                return
-            self._stop_recording(
-                timeout_reached=timeout_reached,
-                timeout_seconds=timeout_seconds,
-            )
-
-        try:
-            from PyObjCTools import AppHelper
-
-            AppHelper.callAfter(stop)
-        except Exception:
-            stop()
-
-    def _stop_recording(
-        self,
-        timeout_reached: bool = False,
-        timeout_seconds: int | None = None,
-    ):
-        self.recording = False
-        if self.stream is not None:
-            try:
-                self.stream.stop()
-                self.stream.close()
-            except Exception as exc:
-                notify_user(f"Failed to stop audio stream: {exc}", self.notifications_enabled)
-            self.stream = None
-
-        self.title = IDLE_ICON
-        self.menu["Record"].title = "Record"
-
-        if timeout_reached:
-            timeout_value = (
-                timeout_seconds if timeout_seconds is not None else RECORDING_STALL_TIMEOUT_SEC
-            )
-            notify_user(
-                f"Recording stopped: no audio data for {timeout_value} seconds.",
+        else:
+            self._settings_window.update_state(
                 self.notifications_enabled,
+                self.ssl_verification_enabled,
+                self.current_hotkey,
             )
+        self._settings_window.show()
 
-        with self._recording_lock:
-            has_audio = bool(self.audio_frames)
+    def _on_hotkey_change(self, pynput_str: str) -> None:
+        self.current_hotkey = pynput_str
+        set_setting("hotkey", pynput_str)
+        self._update_record_key_equivalent()
+        # Defer to next run loop iteration so any in-progress event handling finishes.
+        self._dispatch_to_main(self._restart_hotkey_listener)
 
-        if not has_audio:
-            notify_user("No audio recorded.", self.notifications_enabled)
-            return
+    def _on_notifications_change(self, enabled: bool) -> None:
+        self.notifications_enabled = enabled
+        set_setting("notifications_enabled", enabled)
 
-        with self._recording_lock:
-            audio = np.concatenate(self.audio_frames, axis=0).flatten()
-            self.audio_frames = []
-
-        self.title = PROCESSING_ICON
-        threading.Thread(target=self._transcribe, args=(audio,), daemon=True).start()
-
-    # -- transcription -------------------------------------------------------
-
-    def _transcribe(self, audio: np.ndarray):
-        try:
-            if self.model is None:
-                model_name = "small"
-                download_required = self._model_download_required(model_name)
-                if download_required:
-                    self.title = DOWNLOADING_ICON
-                    notify_user(
-                        "Downloading Whisper model for first use...",
-                        self.notifications_enabled,
-                    )
-                self.model = whisper.load_model(model_name)
-                if download_required:
-                    self.title = IDLE_ICON
-                    notify_user(
-                        "Whisper model downloaded.",
-                        self.notifications_enabled,
-                    )
-
-            # Pass raw audio directly to Whisper to avoid ffmpeg dependency.
-            audio_float32 = np.asarray(audio, dtype=np.float32)
-            result = self.model.transcribe(audio_float32)
-            text = result.get("text", "").strip()
-            self.title = IDLE_ICON
-
-            if text:
-                copied = copy_to_clipboard(text)
-                if copied:
-                    notify_user(
-                        "Recognized and copied to clipboard.",
-                        self.notifications_enabled,
-                    )
-                else:
-                    notify_user(
-                        "Recognized, but failed to copy to clipboard.",
-                        self.notifications_enabled,
-                    )
-            else:
-                notify_user("No speech detected.", self.notifications_enabled)
-        except Exception as exc:
-            self.title = IDLE_ICON
-            notify_user(f"Error: {exc}", self.notifications_enabled)
-
-    # -- diagnostics ---------------------------------------------------------
+    def _on_ssl_change(self, enabled: bool) -> None:
+        self.ssl_verification_enabled = enabled
+        set_setting("ssl_verification_enabled", enabled)
+        configure_ssl_verification(enabled)
+        self.recorder.ssl_verification_enabled = enabled
 
     def show_diagnostics(self, _sender=None):
-        status = get_permission_status()
-        notif_status = get_notification_status()
-        bundle_id = "N/A"
-        try:
-            from Foundation import NSBundle
-            bundle = NSBundle.mainBundle()
-            if bundle:
-                bundle_id = bundle.bundleIdentifier() or "None"
-        except Exception:
-            pass
-
-        # Whisper model info
-        model_name = "small"
-        model_loaded = self.model is not None
-        cache_dir = os.path.expanduser("~/.cache/whisper")
-        model_file = os.path.join(cache_dir, f"{model_name}.pt")
-        model_path = model_file if os.path.exists(model_file) else None
-
-        lines = [
-            f"Process: {os.path.basename(sys.executable)}",
-            f"Executable: {sys.executable}",
-            f"Bundle ID: {bundle_id}",
-            f"Accessibility: {status.accessibility}",
-            f"Input Monitoring: {status.input_monitoring}",
-            f"Notifications: {notif_status}",
-            f"Hotkey: {HOTKEY_LABEL}",
-            f"Whisper model: {model_name} (downloaded: {'yes' if model_path else 'no'}, in memory: {'yes' if model_loaded else 'no'})",
-            f"Model path: {model_path or 'N/A'}",
-        ]
-        show_alert("Diagnostics", "\n".join(lines))
-
-    def show_audio_diagnostics(self, _sender=None):
-        device = get_audio_device_status()
-        if self.recording:
-            probe = AudioProbeResult(
-                duration_sec=2.0,
-                samplerate=SAMPLE_RATE,
-                total_frames=0,
-                callbacks=0,
-                rms=0.0,
-                peak=0.0,
-                status_flags=(),
-                verdict="ERROR",
-                error="Recording is currently active.",
-            )
-        else:
-            probe = probe_audio_input(duration_sec=2.0, samplerate=SAMPLE_RATE, channels=1)
-
-        default_input = (
-            "None"
-            if device.default_input_index is None
-            else f"{device.default_input_index}: {device.default_input_name}"
+        text = format_diagnostics_text(
+            ssl_verification_enabled=self.ssl_verification_enabled,
+            model_loaded=self.recorder.model_loaded,
         )
-        callback_status = ", ".join(probe.status_flags) if probe.status_flags else "none"
-        verdict = f"Audio probe: {probe.verdict}"
-        if probe.verdict == "ERROR" and probe.error:
-            verdict = f"{verdict}: {probe.error}"
+        show_alert("Diagnostics", text)
 
-        lines = [
-            f"Process: {os.path.basename(sys.executable)}",
-            f"Executable: {sys.executable}",
-            f"Default Input Device: {default_input}",
-            f"Input Channels: {device.max_input_channels}",
-            f"Default Sample Rate: {device.default_samplerate}",
-            f"Probe Duration: {probe.duration_sec:.1f}s",
-            f"Probe Sample Rate: {probe.samplerate}",
-            f"Frames Received: {probe.total_frames}",
-            f"Callbacks: {probe.callbacks}",
-            f"RMS: {probe.rms:.6f}",
-            f"Peak: {probe.peak:.6f}",
-            f"Callback Status: {callback_status}",
-            verdict,
-        ]
-        if device.error:
-            lines.append(f"Device Query Error: {device.error}")
-
-        show_alert("Audio Diagnostics", "\n".join(lines))
-
-    # -- settings ------------------------------------------------------------
+    # -- settings navigation -------------------------------------------------
 
     def open_accessibility_settings(self, _sender=None):
         open_settings_url(
@@ -446,42 +250,77 @@ class SayLessApp(rumps.App):
         )
         self._refresh_permission_menu()
 
-    # -- hotkey --------------------------------------------------------------
+    # -- hotkey & lifecycle --------------------------------------------------
 
     def _toggle_recording_on_main_thread(self):
         """Ensure UI/state changes happen on macOS main thread."""
-        try:
-            from PyObjCTools import AppHelper
-
-            AppHelper.callAfter(self.toggle_recording)
-        except Exception:
-            self.toggle_recording()
+        self._dispatch_to_main(self.toggle_recording)
 
     def _setup_hotkey(self):
-        """Register global hotkeys via pynput."""
-        from pynput import keyboard
+        """Register global hotkey via NSEvent global monitor.
 
-        def on_activate():
-            self._toggle_recording_on_main_thread()
+        Uses NSEvent instead of pynput to avoid TSMGetInputSourceProperty
+        being called off the main queue (crashes on macOS 26+).
+        """
+        import AppKit
+        from writeless.hotkey_utils import pynput_to_ns_keycode_and_mask
 
-        self.hotkey_listener = keyboard.GlobalHotKeys({HOTKEY: on_activate})
-        self.hotkey_listener.daemon = True
-        self.hotkey_listener.start()
+        key_code, modifier_mask = pynput_to_ns_keycode_and_mask(self.current_hotkey)
+        if key_code is None:
+            raise ValueError(f"Cannot map hotkey to keycode: {self.current_hotkey}")
+
+        check_mask = (
+            AppKit.NSEventModifierFlagCommand
+            | AppKit.NSEventModifierFlagOption
+            | AppKit.NSEventModifierFlagControl
+            | AppKit.NSEventModifierFlagShift
+        )
+
+        def handler(event):
+            flags = event.modifierFlags() & check_mask
+            if event.keyCode() == key_code and flags == modifier_mask:
+                self._toggle_recording_on_main_thread()
+
+        self.hotkey_listener = AppKit.NSEvent.addGlobalMonitorForEventsMatchingMask_handler_(
+            AppKit.NSKeyDownMask,
+            handler,
+        )
+
+    def _restart_hotkey_listener(self):
+        """Stop the old monitor and register a new one with updated hotkey."""
+        import AppKit
+        old = self.hotkey_listener
+        self.hotkey_listener = None
+        if old is not None:
+            try:
+                AppKit.NSEvent.removeMonitor_(old)
+            except Exception:
+                pass
+        try:
+            self._setup_hotkey()
+            hotkey_label = pynput_to_display(self.current_hotkey)
+            notify_user(f"Hotkey changed: {hotkey_label}", self.notifications_enabled)
+        except Exception as exc:
+            hotkey_label = pynput_to_display(self.current_hotkey)
+            notify_user(
+                f"Hotkey {hotkey_label} unavailable: {exc}",
+                self.notifications_enabled,
+            )
 
     def run(self, **kwargs):
         try:
             status = get_permission_status()
             self._setup_hotkey()
             self.permission_refresh_timer.start()
-            notify_user(f"Hotkey active: {HOTKEY_LABEL}", self.notifications_enabled)
             if status.accessibility is False or status.input_monitoring is False:
                 notify_user(
                     "Grant Accessibility and Input Monitoring to the current process.",
                     self.notifications_enabled,
                 )
         except Exception as exc:
+            hotkey_label = pynput_to_display(self.current_hotkey)
             notify_user(
-                f"Hotkey {HOTKEY_LABEL} unavailable: {exc}",
+                f"Hotkey {hotkey_label} unavailable: {exc}",
                 self.notifications_enabled,
             )
         super().run(**kwargs)

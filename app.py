@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Write Less entrypoint."""
 
-from writeless.menubar_app import SayLessApp
+from writeless.menubar_app import WriteLessApp
 
 
 if __name__ == "__main__":
-    SayLessApp().run()
+    WriteLessApp().run()
 
