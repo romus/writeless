@@ -3,6 +3,10 @@
 Voice-to-text macOS menubar app powered by OpenAI Whisper. Record speech with a global hotkey and get instant
 transcription copied straight to your clipboard - all processed locally on your machine.
 
+## Demo
+
+![Write Less demo](assets/demo.gif)
+
 ## Requirements
 
 - macOS 26+
