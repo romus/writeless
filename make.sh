@@ -1,6 +1,11 @@
 #!/bin/bash
 set -e
 
+WITH_DMG=false
+for arg in "$@"; do
+  [ "$arg" = "--dmg" ] && WITH_DMG=true
+done
+
 BUILD_ROOT="build"
 PY2APP_BUILD_DIR="$BUILD_ROOT/py2app"
 DIST_DIR="$BUILD_ROOT/dist"
@@ -39,6 +44,11 @@ rm -rf "$BUILD_ROOT"
 
 echo "==> Building Write Less.app with py2app..."
 python3 setup.py py2app --bdist-base="$PY2APP_BUILD_DIR" --dist-dir="$DIST_DIR"
+
+if ! $WITH_DMG; then
+  echo "==> Done! $DIST_DIR/Write Less.app is ready."
+  exit 0
+fi
 
 echo "==> Creating DMG..."
 mkdir -p "$TEMP_DIR"

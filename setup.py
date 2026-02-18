@@ -7,12 +7,12 @@ APP = ['app.py']
 OPTIONS = {
     'argv_emulation': False,
     'iconfile': 'icon.icns',
-    'packages': ['rumps', 'sounddevice', '_sounddevice_data', 'whisper',
+    'packages': ['writeless', 'rumps', 'sounddevice', '_sounddevice_data', 'whisper',
                  'torch', 'numpy', 'scipy', 'pynput', 'tiktoken', 'tqdm'],
     'plist': {
         'CFBundleName': 'Write Less',
         'CFBundleDisplayName': 'Write Less',
-        'CFBundleIdentifier': 'com.writeless.app',
+        'CFBundleIdentifier': 'dev.romus.app.writeless',
         'CFBundleShortVersionString': '1.0.0',
         'CFBundleVersion': '1.0.0',
         'LSUIElement': True,
