@@ -3,7 +3,7 @@
 import rumps
 
 from writeless.constants import IDLE_ICON
-from writeless.diagnostics import format_diagnostics_text
+from writeless.diagnostics import format_diagnostics_text, update_audio_device_cache
 from writeless.hotkey_utils import pynput_to_display, pynput_to_ns_key_equivalent
 from writeless.recorder import Recorder, configure_ssl_verification
 from writeless.settings import get as get_setting, set as set_setting
@@ -225,6 +225,8 @@ class WriteLessApp(rumps.App):
         self.recorder.ssl_verification_enabled = enabled
 
     def show_diagnostics(self, _sender=None):
+        if not self.recorder.is_recording:
+            update_audio_device_cache(reinit=True)
         text = format_diagnostics_text(
             ssl_verification_enabled=self.ssl_verification_enabled,
             model_loaded=self.recorder.model_loaded,

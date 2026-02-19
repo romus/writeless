@@ -19,6 +19,7 @@ from writeless.constants import (
     RECORDING_STALL_TIMEOUT_SEC,
     SAMPLE_RATE,
 )
+from writeless.diagnostics import update_audio_device_cache
 from writeless.system_services import copy_to_clipboard
 
 
@@ -73,6 +74,7 @@ class Recorder:
         self._recording = False
         self._audio_frames: list[np.ndarray] = []
         self._stream: sd.InputStream | None = None
+        self._closer_thread: threading.Thread | None = None
         self._session_id = 0
         self._lock = threading.Lock()
         self._received_frame = False
@@ -97,6 +99,25 @@ class Recorder:
         self._received_frame = False
         self._last_frame_at = time.monotonic()
         self._on_status_change(RECORDING_ICON)
+
+        # Wait for any in-flight stream close from a previous session before
+        # reinitialising PortAudio. Without this, sd._terminate() could race
+        # with the closer thread that is still calling stream.stop().
+        closer = self._closer_thread
+        self._closer_thread = None
+        if closer is not None and closer.is_alive():
+            closer.join(timeout=1.0)
+
+        # Re-initialise PortAudio so it picks up the current system default
+        # device. PortAudio caches device info at startup; without this, any
+        # device change (e.g. headphones disconnected) makes the next recording
+        # attempt silently open the wrong or a non-existent device.
+        try:
+            sd._terminate()
+            sd._initialize()
+        except Exception:
+            pass
+        update_audio_device_cache()
 
         def audio_callback(indata, frames, time_info, status):
             del frames, time_info, status
@@ -150,12 +171,20 @@ class Recorder:
                     pass
 
             closer = threading.Thread(target=close_stream, daemon=True)
+            self._closer_thread = closer
             closer.start()
             closer.join(timeout=2.0)
             if closer.is_alive():
                 self._on_notify(
                     "Audio stream took too long to close (device may have changed)."
                 )
+                # Force-reinit PortAudio to break any deadlock caused by
+                # a removed device blocking Pa_StopStream internally.
+                try:
+                    sd._terminate()
+                    sd._initialize()
+                except Exception:
+                    pass
 
         self._on_status_change(IDLE_ICON)
         self._on_recording_stopped()

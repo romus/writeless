@@ -2,6 +2,7 @@
 
 import os
 import sys
+import threading
 from dataclasses import dataclass
 
 import numpy as np
@@ -9,6 +10,9 @@ import sounddevice as sd
 
 from writeless.constants import HOTKEY_LABEL
 from writeless.system_services import get_notification_status, get_permission_status
+
+_device_lock = threading.Lock()
+_cached_device: "AudioDeviceStatus | None" = None
 
 
 @dataclass(frozen=True)
@@ -33,8 +37,8 @@ class AudioProbeResult:
     error: str | None
 
 
-def get_audio_device_status() -> AudioDeviceStatus:
-    """Return default input audio device details."""
+def _query_audio_device_status() -> "AudioDeviceStatus":
+    """Query PortAudio for the current default input device (no re-init)."""
     try:
         device_info = sd.query_devices(kind="input")
         input_index = int(device_info["index"])
@@ -47,6 +51,32 @@ def get_audio_device_status() -> AudioDeviceStatus:
         )
     except Exception as exc:
         return AudioDeviceStatus(None, None, None, None, str(exc))
+
+
+def update_audio_device_cache(reinit: bool = False) -> None:
+    """Refresh the cached device info.
+
+    Pass reinit=True to re-initialise PortAudio first (use when no stream is
+    open). Pass reinit=False (default) when the caller already did the re-init.
+    """
+    global _cached_device
+    if reinit:
+        try:
+            sd._terminate()
+            sd._initialize()
+        except Exception:
+            pass
+    status = _query_audio_device_status()
+    with _device_lock:
+        _cached_device = status
+
+
+def get_audio_device_status() -> AudioDeviceStatus:
+    """Return the cached default input device, or query directly if not yet cached."""
+    with _device_lock:
+        if _cached_device is not None:
+            return _cached_device
+    return _query_audio_device_status()
 
 
 def probe_audio_input(duration_sec: float = 2.0, samplerate: int = 16000, channels: int = 1) -> AudioProbeResult:
