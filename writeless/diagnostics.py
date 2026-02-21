@@ -159,9 +159,12 @@ def format_diagnostics_text(
     except Exception:
         pass
 
-    cache_dir = os.path.expanduser("~/.cache/whisper")
-    model_file = os.path.join(cache_dir, f"{model_name}.pt")
-    model_path = model_file if os.path.exists(model_file) else None
+    model_path = None
+    hf_model_dir = os.path.expanduser(
+        f"~/.cache/huggingface/hub/models--Systran--faster-whisper-{model_name}"
+    )
+    if os.path.isdir(hf_model_dir):
+        model_path = hf_model_dir
 
     device = get_audio_device_status()
     input_device = device.default_input_name or "None"
