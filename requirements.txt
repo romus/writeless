@@ -1,8 +1,8 @@
-openai-whisper
-sounddevice
-scipy
-numpy
-rumps
-pynput
-py2app
-setuptools<78
+openai-whisper==20250625
+sounddevice==0.5.5
+scipy==1.17.0
+numpy==2.3.5
+rumps==0.4.0
+pynput==1.8.1
+py2app==0.28.9
+setuptools==77.0.3
