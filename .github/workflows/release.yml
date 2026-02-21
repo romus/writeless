@@ -20,7 +20,7 @@ jobs:
           python-version: '3.14'
 
       - name: Build .app and .zip
-        run: bash make.sh --zip
+        run: make zip
 
       - name: Get version from tag
         id: version
