@@ -7,7 +7,14 @@ transcription copied straight to your clipboard - all processed locally on your 
 
 ![Write Less demo](assets/demo.gif)
 
-## Requirements
+## Install via Homebrew
+
+```bash
+brew tap romus/writeless
+brew install --cask writeless
+```
+
+## Requirements (building from source)
 
 - macOS 26+
 - Python 3.14+

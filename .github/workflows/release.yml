@@ -1,0 +1,57 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      - name: Build .app and .zip
+        run: bash make.sh --zip
+
+      - name: Get version from tag
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+
+      - name: Compute SHA256
+        id: sha
+        run: |
+          SHA=$(shasum -a 256 build/dist/WriteLess-${{ steps.version.outputs.version }}.zip | awk '{print $1}')
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+          echo "### SHA256" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "$SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/dist/WriteLess-${{ steps.version.outputs.version }}.zip
+          body: |
+            ## Write Less v${{ steps.version.outputs.version }}
+
+            ### Install via Homebrew
+            ```
+            brew tap romus/writeless
+            brew install --cask writeless
+            ```
+
+            ### SHA256
+            ```
+            ${{ steps.sha.outputs.sha256 }}
+            ```
+          draft: false
+          prerelease: false
