@@ -2,6 +2,7 @@ import sys
 sys.setrecursionlimit(5000)
 
 from setuptools import setup
+from writeless.constants import APP_VERSION
 
 APP = ['app.py']
 OPTIONS = {
@@ -13,8 +14,8 @@ OPTIONS = {
         'CFBundleName': 'Write Less',
         'CFBundleDisplayName': 'Write Less',
         'CFBundleIdentifier': 'dev.romus.app.writeless',
-        'CFBundleShortVersionString': '1.0.0',
-        'CFBundleVersion': '1.0.0',
+        'CFBundleShortVersionString': APP_VERSION,
+        'CFBundleVersion': APP_VERSION,
         'LSUIElement': True,
         'NSMicrophoneUsageDescription':
             'Write Less needs microphone access to record and transcribe your speech.',

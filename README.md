@@ -7,7 +7,14 @@ transcription copied straight to your clipboard - all processed locally on your 
 
 ![Write Less demo](assets/demo.gif)
 
-## Requirements
+## Install via Homebrew
+
+```bash
+brew tap romus/writeless
+brew install --cask writeless
+```
+
+## Requirements (building from source)
 
 - macOS 26+
 - Python 3.14+
@@ -15,20 +22,21 @@ transcription copied straight to your clipboard - all processed locally on your 
 ## Run from source
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python3 app.py
+make run
 ```
 
-## Build .app and .dmg
+This creates a virtual environment, installs dependencies, and launches the app.
+
+## Build from source
 
 ```bash
-bash make.sh
+make build       # Build Write Less.app
+make dmg         # Build .app + DMG installer
+make zip         # Build .app + ZIP archive
+make help        # Show all available commands
 ```
 
-The script creates a virtual environment, installs dependencies, and produces `build/dist/Write Less.dmg`. Open the DMG and
-move `Write Less.app` to your Applications folder.
+The built app is located at `build/dist/Write Less.app`.
 
 ## Usage
 
