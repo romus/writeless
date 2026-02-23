@@ -172,7 +172,12 @@ def format_diagnostics_text(
     acc = "OK" if status.accessibility else "MISSING"
     inp = "OK" if status.input_monitoring else "MISSING"
     notif_label = "OK" if notif_status == "authorized" else f"MISSING ({notif_status})"
-    model_status = "yes" if model_path else "no"
+    if model_path:
+        refs_ok = os.path.isdir(os.path.join(hf_model_dir, "refs"))
+        snaps_ok = os.path.isdir(os.path.join(hf_model_dir, "snapshots"))
+        model_status = "yes" if (refs_ok and snaps_ok) else "CORRUPTED"
+    else:
+        model_status = "no"
     model_mem = "yes" if model_loaded else "no"
 
     lines = [

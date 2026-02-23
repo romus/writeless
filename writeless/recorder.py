@@ -1,6 +1,7 @@
 """Audio recording state machine and Whisper transcription."""
 
 import os
+import shutil
 import ssl
 import threading
 import time
@@ -22,6 +23,43 @@ from writeless.constants import (
 )
 from writeless.diagnostics import update_audio_device_cache
 from writeless.system_services import copy_to_clipboard
+
+
+def _get_model_cache_dir(model_name: str) -> str:
+    """Return the HuggingFace Hub cache directory for a faster-whisper model."""
+    return os.path.expanduser(
+        f"~/.cache/huggingface/hub/models--Systran--faster-whisper-{model_name}"
+    )
+
+
+def validate_model_cache(model_name: str) -> bool:
+    """Check if the HuggingFace model cache is structurally valid.
+
+    Returns True if the cache doesn't exist (clean state) or has the
+    expected refs/ and snapshots/ subdirectories. Returns False if the
+    directory exists but is missing required structure.
+    """
+    cache_dir = _get_model_cache_dir(model_name)
+    if not os.path.isdir(cache_dir):
+        return True
+    refs_dir = os.path.join(cache_dir, "refs")
+    snapshots_dir = os.path.join(cache_dir, "snapshots")
+    return os.path.isdir(refs_dir) and os.path.isdir(snapshots_dir)
+
+
+def clear_model_cache(model_name: str) -> bool:
+    """Delete the HuggingFace Hub cache directory for a model.
+
+    Returns True if successfully cleared (or already absent), False on error.
+    """
+    cache_dir = _get_model_cache_dir(model_name)
+    if not os.path.exists(cache_dir):
+        return True
+    try:
+        shutil.rmtree(cache_dir)
+        return True
+    except Exception:
+        return False
 
 
 def configure_ssl_verification(enabled: bool) -> bool:
@@ -253,6 +291,11 @@ class Recorder:
         try:
             if self._model is None:
                 model_name = "small"
+
+                if not validate_model_cache(model_name):
+                    self._on_notify("Model cache corrupted. Clearing...")
+                    clear_model_cache(model_name)
+
                 needs_download = model_download_required(model_name)
                 if needs_download:
                     self._on_status_change(DOWNLOADING_ICON)
@@ -263,9 +306,35 @@ class Recorder:
                 else:
                     self._on_status_change(LOADING_ICON)
                     self._on_notify("Loading Whisper model...")
-                self._model = WhisperModel(
-                    model_name, device="cpu", compute_type="float32"
-                )
+
+                try:
+                    self._model = WhisperModel(
+                        model_name, device="cpu", compute_type="float32"
+                    )
+                except Exception as load_exc:
+                    exc_msg = str(load_exc).lower()
+                    retryable = (
+                        "snapshot" in exc_msg
+                        or "locate the files" in exc_msg
+                        or "client has been closed" in exc_msg
+                    )
+                    if retryable:
+                        try:
+                            from huggingface_hub.utils import close_session
+                            close_session()
+                        except Exception:
+                            pass
+                        self._on_notify(
+                            "Model loading failed. Clearing cache and retrying..."
+                        )
+                        clear_model_cache(model_name)
+                        self._on_status_change(DOWNLOADING_ICON)
+                        self._model = WhisperModel(
+                            model_name, device="cpu", compute_type="float32"
+                        )
+                    else:
+                        raise
+
                 if needs_download:
                     self._on_notify("Whisper model downloaded.")
 
