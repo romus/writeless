@@ -13,6 +13,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python 3.14
         uses: actions/setup-python@v5
@@ -36,6 +38,55 @@ jobs:
           echo "$SHA" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -z "$PREV_TAG" ]; then
+            RANGE="HEAD"
+          else
+            RANGE="${PREV_TAG}..HEAD"
+          fi
+
+          COMMITS=$(git log "$RANGE" --pretty=format:"%s" --no-merges)
+
+          FEATURES=""
+          FIXES=""
+          PERF=""
+          OTHER=""
+
+          while IFS= read -r msg; do
+            [ -z "$msg" ] && continue
+            clean=$(echo "$msg" | sed -E 's/ \(#[0-9]+\)$//')
+            if echo "$msg" | grep -qiE "^feat(\(.+\))?:"; then
+              entry=$(echo "$clean" | sed -E 's/^feat(\(.+\))?: //')
+              FEATURES="${FEATURES}- ${entry}\n"
+            elif echo "$msg" | grep -qiE "^fix(\(.+\))?:"; then
+              entry=$(echo "$clean" | sed -E 's/^fix(\(.+\))?: //')
+              FIXES="${FIXES}- ${entry}\n"
+            elif echo "$msg" | grep -qiE "^perf(\(.+\))?:"; then
+              entry=$(echo "$clean" | sed -E 's/^perf(\(.+\))?: //')
+              PERF="${PERF}- ${entry}\n"
+            elif echo "$msg" | grep -qiE "^(chore|docs|refactor|test|style|ci|build)(\(.+\))?:"; then
+              entry=$(echo "$clean" | sed -E 's/^(chore|docs|refactor|test|style|ci|build)(\(.+\))?: //')
+              OTHER="${OTHER}- ${entry}\n"
+            else
+              OTHER="${OTHER}- ${clean}\n"
+            fi
+          done <<< "$COMMITS"
+
+          CHANGELOG=""
+          [ -n "$FEATURES" ] && CHANGELOG="${CHANGELOG}### ✨ New Features\n${FEATURES}\n"
+          [ -n "$FIXES" ] && CHANGELOG="${CHANGELOG}### 🐛 Bug Fixes\n${FIXES}\n"
+          [ -n "$PERF" ] && CHANGELOG="${CHANGELOG}### ⚡ Performance\n${PERF}\n"
+          [ -n "$OTHER" ] && CHANGELOG="${CHANGELOG}### 📦 Other Changes\n${OTHER}\n"
+
+          {
+            echo "changelog<<EOF"
+            echo -e "$CHANGELOG"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -43,6 +94,7 @@ jobs:
           body: |
             ## Write Less v${{ steps.version.outputs.version }}
 
+            ${{ steps.changelog.outputs.changelog }}
             ### Install via Homebrew
             ```
             brew tap romus/writeless

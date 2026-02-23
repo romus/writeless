@@ -5,7 +5,7 @@ import rumps
 from writeless.constants import IDLE_ICON
 from writeless.diagnostics import format_diagnostics_text, update_audio_device_cache
 from writeless.hotkey_utils import pynput_to_display, pynput_to_ns_key_equivalent
-from writeless.recorder import Recorder, configure_ssl_verification
+from writeless.recorder import Recorder, clear_model_cache, configure_ssl_verification
 from writeless.settings import get as get_setting, set as set_setting
 from writeless.system_services import (
     get_notification_status,
@@ -88,6 +88,7 @@ class WriteLessApp(rumps.App):
             self.permissions_item,
             None,  # separator
             rumps.MenuItem("Diagnostics", callback=self.show_diagnostics),
+            rumps.MenuItem("Clear Model Cache", callback=self.clear_model_cache),
             self.accessibility_settings_item,
             self.input_monitoring_settings_item,
             self.notification_settings_item,
@@ -223,6 +224,24 @@ class WriteLessApp(rumps.App):
         set_setting("ssl_verification_enabled", enabled)
         configure_ssl_verification(enabled)
         self.recorder.ssl_verification_enabled = enabled
+
+    def clear_model_cache(self, _sender=None):
+        """Delete the cached Whisper model so it will be re-downloaded."""
+        success = clear_model_cache("small")
+        if success:
+            self.recorder._model = None
+            show_alert(
+                "Model Cache Cleared",
+                "The Whisper model cache has been removed. "
+                "The model will be re-downloaded on next recording.",
+            )
+        else:
+            show_alert(
+                "Clear Failed",
+                "Could not remove the model cache directory. "
+                "Try manually deleting:\n"
+                "~/.cache/huggingface/hub/models--Systran--faster-whisper-small/",
+            )
 
     def show_diagnostics(self, _sender=None):
         if not self.recorder.is_recording:

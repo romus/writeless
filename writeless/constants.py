@@ -1,6 +1,6 @@
 """Application constants."""
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 
 SAMPLE_RATE = 16000  # Whisper expects 16 kHz
 IDLE_ICON = "🎤"
