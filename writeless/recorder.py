@@ -8,11 +8,12 @@ from collections.abc import Callable
 
 import numpy as np
 import sounddevice as sd
-import whisper
+from faster_whisper import WhisperModel
 
 from writeless.constants import (
     DOWNLOADING_ICON,
     IDLE_ICON,
+    LOADING_ICON,
     PROCESSING_ICON,
     RECORDING_ICON,
     RECORDING_START_TIMEOUT_SEC,
@@ -41,16 +42,12 @@ def configure_ssl_verification(enabled: bool) -> bool:
 
 
 def model_download_required(model_name: str) -> bool:
-    """Return True if Whisper model file is not present in local cache."""
+    """Return True if the CTranslate2 Whisper model is not in local cache."""
     try:
-        model_url = whisper._MODELS.get(model_name)  # type: ignore[attr-defined]
-        if not model_url:
-            return False
-        model_file = os.path.basename(model_url)
-        cache_dir = os.path.expanduser("~/.cache/whisper")
-        return not os.path.exists(os.path.join(cache_dir, model_file))
-    except Exception:
+        WhisperModel(model_name, device="cpu", local_files_only=True)
         return False
+    except Exception:
+        return True
 
 
 class Recorder:
@@ -263,14 +260,18 @@ class Recorder:
                     if not self.ssl_verification_enabled:
                         msg = "Downloading Whisper model with SSL verification disabled."
                     self._on_notify(msg)
-                self._model = whisper.load_model(model_name)
+                else:
+                    self._on_status_change(LOADING_ICON)
+                    self._on_notify("Loading Whisper model...")
+                self._model = WhisperModel(
+                    model_name, device="cpu", compute_type="float32"
+                )
                 if needs_download:
-                    self._on_status_change(IDLE_ICON)
                     self._on_notify("Whisper model downloaded.")
 
             audio_float32 = np.asarray(audio, dtype=np.float32)
-            result = self._model.transcribe(audio_float32)
-            text = result.get("text", "").strip()
+            segments, _info = self._model.transcribe(audio_float32)
+            text = " ".join(seg.text for seg in segments).strip()
             self._on_status_change(IDLE_ICON)
 
             if text:

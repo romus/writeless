@@ -7,8 +7,8 @@ APP = ['app.py']
 OPTIONS = {
     'argv_emulation': False,
     'iconfile': 'icon.icns',
-    'packages': ['writeless', 'rumps', 'sounddevice', '_sounddevice_data', 'whisper',
-                 'torch', 'numpy', 'scipy', 'pynput', 'tiktoken', 'tqdm'],
+    'packages': ['writeless', 'rumps', 'sounddevice', '_sounddevice_data',
+                 'faster_whisper', 'ctranslate2', 'numpy', 'pynput'],
     'plist': {
         'CFBundleName': 'Write Less',
         'CFBundleDisplayName': 'Write Less',

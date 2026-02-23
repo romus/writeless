@@ -1,6 +1,6 @@
 # Write Less
 
-Voice-to-text macOS menubar app powered by OpenAI Whisper. Record speech with a global hotkey and get instant
+Voice-to-text macOS menubar app powered by [faster-whisper](https://github.com/SYSTRAN/faster-whisper). Record speech with a global hotkey and get instant
 transcription copied straight to your clipboard - all processed locally on your machine.
 
 ## Demo
@@ -36,8 +36,8 @@ move `Write Less.app` to your Applications folder.
 - **Cmd+Option+F8** (default) — start/stop recording; configurable in Settings
 - If recording stalls with no incoming audio, it auto-stops after 10–25 seconds
 - After recording stops, Whisper transcribes the audio and copies the result to the clipboard
-- The Whisper model (~461 MB) is downloaded automatically on first use
-- Menubar icon indicates state: 🎤 idle, 🎙️ recording, ⚙️ processing, ⬇️ downloading model
+- The Whisper model is downloaded automatically on first use (~500 MB for the `small` model)
+- Menubar icon indicates state: 🎤 idle, 🎙️ recording, ⚙️ processing, ⬇️ downloading model, ⏳ loading model
 
 ## Settings
 
