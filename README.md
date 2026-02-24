@@ -81,3 +81,27 @@ Then restart the app — it will prompt for permissions again. Alternatively, go
 ## Diagnostics
 
 **Diagnostics** in the menubar menu shows audio device info, SSL status, and whether the Whisper model is loaded.
+
+## Troubleshooting
+
+### Logs
+
+Logs are written to `~/Library/Logs/WriteLess.log` (1 MB rotating). View them with:
+
+```bash
+tail -f ~/Library/Logs/WriteLess.log
+```
+
+When running from source via `make run`, logs also appear in the terminal.
+
+### Model download fails
+
+If the Whisper model fails to download on first use, try:
+
+1. Check your internet connection
+2. Toggle **SSL Verification** off in Settings and try again
+3. Use **Clear Model Cache** from the menubar menu, then record again
+4. Download the model manually:
+   ```bash
+   python3 -c "from huggingface_hub import snapshot_download; snapshot_download('Systran/faster-whisper-small')"
+   ```
