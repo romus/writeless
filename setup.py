@@ -9,7 +9,7 @@ OPTIONS = {
     'argv_emulation': False,
     'iconfile': 'icon.icns',
     'packages': ['writeless', 'rumps', 'sounddevice', '_sounddevice_data',
-                 'faster_whisper', 'ctranslate2', 'numpy', 'pynput'],
+                 'faster_whisper', 'ctranslate2', 'numpy', 'pynput', 'certifi'],
     'plist': {
         'CFBundleName': 'Write Less',
         'CFBundleDisplayName': 'Write Less',

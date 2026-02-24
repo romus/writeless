@@ -65,18 +65,49 @@ def clear_model_cache(model_name: str) -> bool:
         return False
 
 
+def _ensure_ssl_cert_file() -> None:
+    """Set SSL_CERT_FILE from certifi if not already set.
+
+    Bundled py2app builds may not find system CA certificates.
+    certifi is bundled as an httpx dependency.
+    """
+    if os.environ.get("SSL_CERT_FILE"):
+        return
+    try:
+        import certifi
+        os.environ["SSL_CERT_FILE"] = certifi.where()
+    except Exception:
+        pass
+
+
 def configure_ssl_verification(enabled: bool) -> bool:
     """Configure global SSL certificate verification for HTTPS requests.
 
-    NOTE: This patches ssl._create_default_https_context which affects ALL
-    HTTPS connections in the process, not just Whisper model downloads.
-    Currently acceptable because the only network call is model download.
+    Patches both stdlib ssl (for urllib-based clients) and the httpx backend
+    used by huggingface_hub for model downloads.
     """
     try:
         if enabled:
             ssl._create_default_https_context = ssl.create_default_context
+            _ensure_ssl_cert_file()
         else:
             ssl._create_default_https_context = ssl._create_unverified_context
+
+        # huggingface_hub uses httpx — configure its HTTP backend directly
+        try:
+            from huggingface_hub.utils._http import set_client_factory
+            import httpx
+            verify = enabled
+            if enabled:
+                try:
+                    import certifi
+                    verify = certifi.where()
+                except Exception:
+                    verify = True
+            set_client_factory(lambda: httpx.Client(verify=verify))
+        except Exception:
+            logger.debug("Could not configure huggingface_hub HTTP backend", exc_info=True)
+
         return True
     except Exception:
         return False
