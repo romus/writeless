@@ -1,11 +1,14 @@
 """Audio recording state machine and Whisper transcription."""
 
+import logging
 import os
 import shutil
 import ssl
 import threading
 import time
 from collections.abc import Callable
+
+logger = logging.getLogger(__name__)
 
 import numpy as np
 import sounddevice as sd
@@ -170,6 +173,7 @@ class Recorder:
             )
             self._stream.start()
         except Exception as exc:
+            logger.exception("Failed to start recording")
             self._recording = False
             self._stream = None
             self._on_status_change(IDLE_ICON)
@@ -293,6 +297,7 @@ class Recorder:
                 model_name = "small"
 
                 if not validate_model_cache(model_name):
+                    logger.warning("Model cache corrupted, clearing")
                     self._on_notify("Model cache corrupted. Clearing...")
                     clear_model_cache(model_name)
 
@@ -319,19 +324,28 @@ class Recorder:
                         or "client has been closed" in exc_msg
                     )
                     if retryable:
+                        logger.warning(
+                            "Model load failed (retryable), clearing cache: %s",
+                            load_exc,
+                        )
                         try:
                             from huggingface_hub.utils import close_session
                             close_session()
                         except Exception:
                             pass
-                        self._on_notify(
-                            "Model loading failed. Clearing cache and retrying..."
-                        )
                         clear_model_cache(model_name)
                         self._on_status_change(DOWNLOADING_ICON)
-                        self._model = WhisperModel(
-                            model_name, device="cpu", compute_type="float32"
-                        )
+                        try:
+                            self._model = WhisperModel(
+                                model_name, device="cpu", compute_type="float32"
+                            )
+                        except Exception as retry_exc:
+                            logger.exception("Model download retry failed")
+                            raise RuntimeError(
+                                "Could not download Whisper model. "
+                                "Check your internet connection.\n"
+                                "Try toggling 'SSL Verification' in Settings."
+                            ) from retry_exc
                     else:
                         raise
 
@@ -352,6 +366,7 @@ class Recorder:
             else:
                 self._on_notify("No speech detected.")
         except Exception as exc:
+            logger.exception("Transcription error")
             self._on_status_change(IDLE_ICON)
             message = f"Error: {exc}"
             if "CERTIFICATE_VERIFY_FAILED" in str(exc):

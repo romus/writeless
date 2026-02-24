@@ -1,6 +1,10 @@
 """Menubar application — thin orchestrator."""
 
+import logging
+
 import rumps
+
+logger = logging.getLogger(__name__)
 
 from writeless.constants import IDLE_ICON
 from writeless.diagnostics import format_diagnostics_text, update_audio_device_cache
@@ -220,6 +224,7 @@ class WriteLessApp(rumps.App):
         set_setting("notifications_enabled", enabled)
 
     def _on_ssl_change(self, enabled: bool) -> None:
+        logger.info("SSL verification changed: %s", enabled)
         self.ssl_verification_enabled = enabled
         set_setting("ssl_verification_enabled", enabled)
         configure_ssl_verification(enabled)
@@ -329,6 +334,7 @@ class WriteLessApp(rumps.App):
             )
 
     def run(self, **kwargs):
+        logger.info("Write Less starting")
         try:
             status = get_permission_status()
             self._setup_hotkey()
@@ -339,6 +345,7 @@ class WriteLessApp(rumps.App):
                     self.notifications_enabled,
                 )
         except Exception as exc:
+            logger.exception("Hotkey setup failed")
             hotkey_label = pynput_to_display(self.current_hotkey)
             notify_user(
                 f"Hotkey {hotkey_label} unavailable: {exc}",
