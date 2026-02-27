@@ -44,7 +44,8 @@ The built app is located at `build/dist/Write Less.app`.
 - **Cmd+Option+F8** (default) — start/stop recording; configurable in Settings
 - If recording stalls with no incoming audio, it auto-stops after 10–25 seconds
 - After recording stops, Whisper transcribes the audio and copies the result to the clipboard
-- The Whisper model is downloaded automatically on first use (~500 MB for the `small` model)
+- The Whisper model is downloaded automatically on first use (size depends on the selected model; `small` is ~465 MB)
+- Available models: Tiny (~75 MB), Base (~145 MB), Small (~465 MB), Medium (~1.5 GB), Large v3 (~3 GB) — selectable in Settings
 - Menubar icon indicates state: 🎤 idle, 🎙️ recording, ⚙️ processing, ⬇️ downloading model, ⏳ loading model
 
 ## Settings
@@ -52,6 +53,7 @@ The built app is located at `build/dist/Write Less.app`.
 Open **Settings…** from the menubar menu to configure:
 
 - **Keyboard shortcut** — click the field and press any key combination to change the global hotkey
+- **Whisper Model** — choose the transcription model (smaller = faster, larger = more accurate)
 - **Notifications** — toggle system notifications for transcription results
 - **SSL Verification** — toggle TLS certificate checks for model download (disable for problematic networks/proxies)
 
@@ -80,7 +82,7 @@ Then restart the app — it will prompt for permissions again. Alternatively, go
 
 ## Diagnostics
 
-**Diagnostics** in the menubar menu shows audio device info, SSL status, and whether the Whisper model is loaded.
+**Diagnostics** in the menubar menu shows app version, current hotkey, audio device info, permissions status, selected Whisper model, and SSL status.
 
 ## Troubleshooting
 

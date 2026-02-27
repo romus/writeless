@@ -8,7 +8,8 @@ from dataclasses import dataclass
 import numpy as np
 import sounddevice as sd
 
-from writeless.constants import HOTKEY_LABEL
+from writeless.constants import APP_VERSION
+from writeless.hotkey_utils import pynput_to_display
 from writeless.system_services import get_notification_status, get_permission_status
 
 _device_lock = threading.Lock()
@@ -145,6 +146,7 @@ def format_diagnostics_text(
     ssl_verification_enabled: bool,
     model_loaded: bool,
     model_name: str = "small",
+    hotkey_pynput: str = "",
 ) -> str:
     """Gather system info and return formatted diagnostics text."""
     status = get_permission_status()
@@ -182,13 +184,14 @@ def format_diagnostics_text(
 
     lines = [
         "— App —",
+        f"  Version:    {APP_VERSION}",
         f"  Process:    {os.path.basename(sys.executable)}",
         f"  Bundle ID:  {bundle_id}",
         f"  Executable: {sys.executable}",
         "",
         "— Audio —",
         f"  Input Device: {input_device}",
-        f"  Hotkey:       {HOTKEY_LABEL}",
+        f"  Hotkey:       {pynput_to_display(hotkey_pynput) if hotkey_pynput else 'N/A'}",
         "",
         "— Permissions —",
         f"  Accessibility:    {acc}",

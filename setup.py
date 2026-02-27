@@ -10,6 +10,8 @@ OPTIONS = {
     'iconfile': 'icon.icns',
     'packages': ['writeless', 'rumps', 'sounddevice', '_sounddevice_data',
                  'faster_whisper', 'ctranslate2', 'numpy', 'pynput', 'certifi'],
+    'excludes': ['torch', 'torchgen', 'scipy', 'sympy', 'numba',
+                 'onnxruntime', 'torchaudio', 'torchvision'],
     'plist': {
         'CFBundleName': 'Write Less',
         'CFBundleDisplayName': 'Write Less',

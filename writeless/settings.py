@@ -12,6 +12,7 @@ _DEFAULTS = {
     "notifications_enabled": True,
     "ssl_verification_enabled": True,
     "hotkey": "<cmd>+<alt>+<f8>",
+    "whisper_model": "small",
 }
 
 

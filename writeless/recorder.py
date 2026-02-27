@@ -15,6 +15,7 @@ import sounddevice as sd
 from faster_whisper import WhisperModel
 
 from writeless.constants import (
+    DEFAULT_WHISPER_MODEL,
     DOWNLOADING_ICON,
     IDLE_ICON,
     LOADING_ICON,
@@ -149,6 +150,7 @@ class Recorder:
         self._received_frame = False
         self._last_frame_at = 0.0
         self._model = None  # lazy-loaded
+        self.model_name = DEFAULT_WHISPER_MODEL
         self.ssl_verification_enabled = True
 
     @property
@@ -325,7 +327,7 @@ class Recorder:
     def _transcribe(self, audio: np.ndarray) -> None:
         try:
             if self._model is None:
-                model_name = "small"
+                model_name = self.model_name
 
                 if not validate_model_cache(model_name):
                     logger.warning("Model cache corrupted, clearing")
