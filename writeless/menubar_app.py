@@ -32,6 +32,7 @@ class WriteLessApp(rumps.App):
         request_notification_permission()
         self.notifications_enabled = get_setting("notifications_enabled")
         self.current_hotkey = get_setting("hotkey")
+        self.current_model = get_setting("whisper_model")
 
         self.recorder = Recorder(
             on_status_change=self._set_status,
@@ -40,6 +41,7 @@ class WriteLessApp(rumps.App):
             dispatch_to_main=self._dispatch_to_main,
         )
         self.recorder.ssl_verification_enabled = self.ssl_verification_enabled
+        self.recorder.model_name = self.current_model
 
         self.hotkey_listener = None
         self._settings_window = None
@@ -200,15 +202,18 @@ class WriteLessApp(rumps.App):
                 current_hotkey=self.current_hotkey,
                 notifications_enabled=self.notifications_enabled,
                 ssl_verification_enabled=self.ssl_verification_enabled,
+                current_model=self.current_model,
                 on_hotkey_change=self._on_hotkey_change,
                 on_notifications_change=self._on_notifications_change,
                 on_ssl_change=self._on_ssl_change,
+                on_model_change=self._on_model_change,
             )
         else:
             self._settings_window.update_state(
                 self.notifications_enabled,
                 self.ssl_verification_enabled,
                 self.current_hotkey,
+                self.current_model,
             )
         self._settings_window.show()
 
@@ -223,6 +228,13 @@ class WriteLessApp(rumps.App):
         self.notifications_enabled = enabled
         set_setting("notifications_enabled", enabled)
 
+    def _on_model_change(self, model_id: str) -> None:
+        logger.info("Whisper model changed: %s", model_id)
+        self.current_model = model_id
+        set_setting("whisper_model", model_id)
+        self.recorder.model_name = model_id
+        self.recorder._model = None  # unload; will reload on next recording
+
     def _on_ssl_change(self, enabled: bool) -> None:
         logger.info("SSL verification changed: %s", enabled)
         self.ssl_verification_enabled = enabled
@@ -232,12 +244,13 @@ class WriteLessApp(rumps.App):
 
     def clear_model_cache(self, _sender=None):
         """Delete the cached Whisper model so it will be re-downloaded."""
-        success = clear_model_cache("small")
+        model = self.current_model
+        success = clear_model_cache(model)
         if success:
             self.recorder._model = None
             show_alert(
                 "Model Cache Cleared",
-                "The Whisper model cache has been removed. "
+                f"The Whisper {model} model cache has been removed. "
                 "The model will be re-downloaded on next recording.",
             )
         else:
@@ -245,7 +258,7 @@ class WriteLessApp(rumps.App):
                 "Clear Failed",
                 "Could not remove the model cache directory. "
                 "Try manually deleting:\n"
-                "~/.cache/huggingface/hub/models--Systran--faster-whisper-small/",
+                f"~/.cache/huggingface/hub/models--Systran--faster-whisper-{model}/",
             )
 
     def show_diagnostics(self, _sender=None):
@@ -254,6 +267,8 @@ class WriteLessApp(rumps.App):
         text = format_diagnostics_text(
             ssl_verification_enabled=self.ssl_verification_enabled,
             model_loaded=self.recorder.model_loaded,
+            model_name=self.current_model,
+            hotkey_pynput=self.current_hotkey,
         )
         show_alert("Diagnostics", text)
 

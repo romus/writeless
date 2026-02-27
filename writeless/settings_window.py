@@ -4,6 +4,7 @@ import AppKit
 import objc
 from Foundation import NSObject, NSMakeRect
 
+from writeless.constants import WHISPER_MODELS
 from writeless.hotkey_utils import (
     ns_event_to_pynput,
     pynput_to_display,
@@ -130,6 +131,13 @@ class _ActionTarget(NSObject):
             enabled = sender.state() == AppKit.NSControlStateValueOn
             self._callbacks["ssl_toggled"](enabled)
 
+    @objc.IBAction
+    def modelChanged_(self, sender):
+        if "model_changed" in self._callbacks:
+            index = sender.indexOfSelectedItem()
+            model_id = WHISPER_MODELS[index][0]
+            self._callbacks["model_changed"](model_id)
+
 
 # ── Window delegate ──────────────────────────────────────────────────────────
 
@@ -153,9 +161,11 @@ class SettingsWindow:
         current_hotkey: str,
         notifications_enabled: bool,
         ssl_verification_enabled: bool,
+        current_model: str = "small",
         on_hotkey_change=None,
         on_notifications_change=None,
         on_ssl_change=None,
+        on_model_change=None,
     ):
         self._on_hotkey_change = on_hotkey_change
 
@@ -163,9 +173,10 @@ class SettingsWindow:
         self._target = _ActionTarget.alloc().initWithCallbacks_({
             "notif_toggled": on_notifications_change,
             "ssl_toggled": on_ssl_change,
+            "model_changed": on_model_change,
         })
 
-        num_rows = 3
+        num_rows = 4
         content_height = _PADDING * 2 + num_rows * _ROW_HEIGHT + (num_rows - 1) * 8
         frame = NSMakeRect(0, 0, _WINDOW_WIDTH, content_height)
 
@@ -215,6 +226,29 @@ class SettingsWindow:
             content, y, ssl_verification_enabled, b"sslToggled:"
         )
 
+        y -= _ROW_HEIGHT + 8
+
+        # Row 4: Whisper Model
+        self._add_label(content, "Whisper Model", y)
+        field_x = _LABEL_WIDTH + _PADDING
+        field_width = _WINDOW_WIDTH - field_x - _PADDING
+        self._model_popup = AppKit.NSPopUpButton.alloc().initWithFrame_pullsDown_(
+            NSMakeRect(field_x, y + 2, field_width, _FIELD_HEIGHT),
+            False,
+        )
+        for _model_id, label in WHISPER_MODELS:
+            self._model_popup.addItemWithTitle_(label)
+        current_index = next(
+            (i for i, (mid, _) in enumerate(WHISPER_MODELS) if mid == current_model),
+            2,  # fallback to "small" index
+        )
+        self._model_popup.selectItemAtIndex_(current_index)
+        self._model_popup.setTarget_(self._target)
+        self._model_popup.setAction_(b"modelChanged:")
+        font = AppKit.NSFont.systemFontOfSize_(13)
+        self._model_popup.setFont_(font)
+        content.addSubview_(self._model_popup)
+
     def _add_label(self, parent, text, y):
         label = AppKit.NSTextField.labelWithString_(text)
         label.setFrame_(NSMakeRect(_PADDING, y + 6, _LABEL_WIDTH, 20))
@@ -240,7 +274,7 @@ class SettingsWindow:
         self._window.makeKeyAndOrderFront_(None)
         AppKit.NSApp().activateIgnoringOtherApps_(True)
 
-    def update_state(self, notifications_enabled, ssl_verification_enabled, current_hotkey):
+    def update_state(self, notifications_enabled, ssl_verification_enabled, current_hotkey, current_model):
         """Refresh UI to match current app state (called when re-showing)."""
         self._hotkey_field.set_hotkey(current_hotkey)
         self._notif_switch.setState_(
@@ -249,3 +283,8 @@ class SettingsWindow:
         self._ssl_switch.setState_(
             AppKit.NSControlStateValueOn if ssl_verification_enabled else AppKit.NSControlStateValueOff
         )
+        current_index = next(
+            (i for i, (mid, _) in enumerate(WHISPER_MODELS) if mid == current_model),
+            2,
+        )
+        self._model_popup.selectItemAtIndex_(current_index)
