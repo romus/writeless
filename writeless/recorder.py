@@ -161,6 +161,31 @@ class Recorder:
     def model_loaded(self) -> bool:
         return self._model is not None
 
+    def cleanup(self) -> None:
+        """Release all audio resources. Safe to call multiple times."""
+        self._recording = False
+        stream = self._stream
+        self._stream = None
+        if stream is not None:
+            try:
+                stream.abort()
+            except Exception:
+                pass
+            try:
+                stream.close()
+            except Exception:
+                pass
+
+        closer = self._closer_thread
+        self._closer_thread = None
+        if closer is not None and closer.is_alive():
+            closer.join(timeout=2.0)
+
+        try:
+            sd._terminate()
+        except Exception:
+            pass
+
     def start(self) -> None:
         """Begin recording audio from the default input device."""
         self._audio_frames = []
@@ -177,17 +202,21 @@ class Recorder:
         closer = self._closer_thread
         self._closer_thread = None
         if closer is not None and closer.is_alive():
+            logger.debug("[stream] waiting for previous closer thread")
             closer.join(timeout=1.0)
+            if closer.is_alive():
+                logger.debug("[stream] previous closer thread still alive after join")
 
         # Re-initialise PortAudio so it picks up the current system default
         # device. PortAudio caches device info at startup; without this, any
         # device change (e.g. headphones disconnected) makes the next recording
         # attempt silently open the wrong or a non-existent device.
+        logger.debug("[stream] reinitialising PortAudio")
         try:
             sd._terminate()
             sd._initialize()
         except Exception:
-            pass
+            logger.debug("[stream] PortAudio reinit failed", exc_info=True)
         update_audio_device_cache()
 
         def audio_callback(indata, frames, time_info, status):
@@ -198,6 +227,7 @@ class Recorder:
                 self._last_frame_at = time.monotonic()
 
         try:
+            logger.debug("[stream] opening InputStream")
             self._stream = sd.InputStream(
                 samplerate=SAMPLE_RATE,
                 channels=1,
@@ -205,6 +235,7 @@ class Recorder:
                 callback=audio_callback,
             )
             self._stream.start()
+            logger.debug("[stream] InputStream started")
         except Exception as exc:
             logger.exception("Failed to start recording")
             self._recording = False
@@ -226,37 +257,49 @@ class Recorder:
         timeout_seconds: int | None = None,
     ) -> None:
         """Stop recording and kick off transcription if audio was captured."""
+        logger.debug("[stream] stop() called, timeout_reached=%s", timeout_reached)
         self._recording = False
         if self._stream is not None:
             stream = self._stream
             self._stream = None
 
             def close_stream():
-                try:
-                    stream.stop()
-                    stream.close()
-                except Exception:
-                    pass
+                t0 = time.monotonic()
+                logger.debug("[stream] close_stream: calling abort()")
                 try:
                     stream.abort()
                 except Exception:
-                    pass
+                    logger.debug("[stream] abort() failed", exc_info=True)
+                logger.debug("[stream] close_stream: abort() done in %.3fs", time.monotonic() - t0)
+                t1 = time.monotonic()
+                logger.debug("[stream] close_stream: calling close()")
+                try:
+                    stream.close()
+                except Exception:
+                    logger.debug("[stream] close() failed", exc_info=True)
+                logger.debug("[stream] close_stream: close() done in %.3fs", time.monotonic() - t1)
 
             closer = threading.Thread(target=close_stream, daemon=True)
             self._closer_thread = closer
             closer.start()
-            closer.join(timeout=2.0)
+            closer.join(timeout=0.5)
             if closer.is_alive():
-                self._on_notify(
-                    "Audio stream took too long to close (device may have changed)."
-                )
-                # Force-reinit PortAudio to break any deadlock caused by
-                # a removed device blocking Pa_StopStream internally.
+                logger.debug("[stream] closer thread hung after 0.5s, force-terminating PortAudio")
                 try:
                     sd._terminate()
+                except Exception:
+                    logger.debug("[stream] sd._terminate() failed", exc_info=True)
+                closer.join(timeout=1.0)
+                if closer.is_alive():
+                    logger.debug("[stream] closer thread STILL alive after sd._terminate()")
+                else:
+                    logger.debug("[stream] closer thread finished after sd._terminate()")
+                try:
                     sd._initialize()
                 except Exception:
-                    pass
+                    logger.debug("[stream] sd._initialize() failed", exc_info=True)
+            else:
+                logger.debug("[stream] closer thread finished normally")
 
         self._on_status_change(IDLE_ICON)
         self._on_recording_stopped()

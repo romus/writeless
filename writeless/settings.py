@@ -13,6 +13,7 @@ _DEFAULTS = {
     "ssl_verification_enabled": True,
     "hotkey": "<cmd>+<alt>+<f8>",
     "whisper_model": "small",
+    "debug_logging": False,
 }
 
 

@@ -132,6 +132,12 @@ class _ActionTarget(NSObject):
             self._callbacks["ssl_toggled"](enabled)
 
     @objc.IBAction
+    def debugToggled_(self, sender):
+        if "debug_toggled" in self._callbacks:
+            enabled = sender.state() == AppKit.NSControlStateValueOn
+            self._callbacks["debug_toggled"](enabled)
+
+    @objc.IBAction
     def modelChanged_(self, sender):
         if "model_changed" in self._callbacks:
             index = sender.indexOfSelectedItem()
@@ -162,10 +168,12 @@ class SettingsWindow:
         notifications_enabled: bool,
         ssl_verification_enabled: bool,
         current_model: str = "small",
+        debug_logging: bool = False,
         on_hotkey_change=None,
         on_notifications_change=None,
         on_ssl_change=None,
         on_model_change=None,
+        on_debug_logging_change=None,
     ):
         self._on_hotkey_change = on_hotkey_change
 
@@ -173,10 +181,11 @@ class SettingsWindow:
         self._target = _ActionTarget.alloc().initWithCallbacks_({
             "notif_toggled": on_notifications_change,
             "ssl_toggled": on_ssl_change,
+            "debug_toggled": on_debug_logging_change,
             "model_changed": on_model_change,
         })
 
-        num_rows = 4
+        num_rows = 5
         content_height = _PADDING * 2 + num_rows * _ROW_HEIGHT + (num_rows - 1) * 8
         frame = NSMakeRect(0, 0, _WINDOW_WIDTH, content_height)
 
@@ -249,6 +258,14 @@ class SettingsWindow:
         self._model_popup.setFont_(font)
         content.addSubview_(self._model_popup)
 
+        y -= _ROW_HEIGHT + 8
+
+        # Row 5: Debug Logging
+        self._add_label(content, "Debug Logging", y)
+        self._debug_switch = self._add_switch(
+            content, y, debug_logging, b"debugToggled:"
+        )
+
     def _add_label(self, parent, text, y):
         label = AppKit.NSTextField.labelWithString_(text)
         label.setFrame_(NSMakeRect(_PADDING, y + 6, _LABEL_WIDTH, 20))
@@ -274,7 +291,7 @@ class SettingsWindow:
         self._window.makeKeyAndOrderFront_(None)
         AppKit.NSApp().activateIgnoringOtherApps_(True)
 
-    def update_state(self, notifications_enabled, ssl_verification_enabled, current_hotkey, current_model):
+    def update_state(self, notifications_enabled, ssl_verification_enabled, current_hotkey, current_model, debug_logging=False):
         """Refresh UI to match current app state (called when re-showing)."""
         self._hotkey_field.set_hotkey(current_hotkey)
         self._notif_switch.setState_(
@@ -282,6 +299,9 @@ class SettingsWindow:
         )
         self._ssl_switch.setState_(
             AppKit.NSControlStateValueOn if ssl_verification_enabled else AppKit.NSControlStateValueOff
+        )
+        self._debug_switch.setState_(
+            AppKit.NSControlStateValueOn if debug_logging else AppKit.NSControlStateValueOff
         )
         current_index = next(
             (i for i, (mid, _) in enumerate(WHISPER_MODELS) if mid == current_model),

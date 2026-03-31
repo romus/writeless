@@ -1,5 +1,25 @@
+import os
+import shutil
+import subprocess
 import sys
+
 sys.setrecursionlimit(5000)
+
+# macOS Sequoia+ adds com.apple.provenance to copied files, which prevents
+# py2app/macholib from modifying Mach-O headers. Strip xattrs and ad-hoc
+# signatures after each copy so the build can proceed.
+_orig_copy2 = shutil.copy2
+
+def _copy2_strip_provenance(src, dst, **kwargs):
+    result = _orig_copy2(src, dst, **kwargs)
+    dest = dst if not os.path.isdir(dst) else os.path.join(dst, os.path.basename(src))
+    dest_str = os.fsdecode(dest)
+    if dest_str.endswith(('.so', '.dylib')):
+        subprocess.run(['xattr', '-c', dest], capture_output=True)
+        subprocess.run(['codesign', '--remove-signature', dest], capture_output=True)
+    return result
+
+shutil.copy2 = _copy2_strip_provenance
 
 from setuptools import setup
 from writeless.constants import APP_VERSION
