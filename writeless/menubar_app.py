@@ -1,8 +1,12 @@
 """Menubar application — thin orchestrator."""
 
+import atexit
 import logging
+import signal
 
 import rumps
+
+_APP_LOGGER_NAME = "writeless"
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +29,9 @@ from writeless.system_services import (
 class WriteLessApp(rumps.App):
     def __init__(self):
         super().__init__("Write Less", icon=None, title=IDLE_ICON)
+
+        self.debug_logging = get_setting("debug_logging")
+        self._apply_log_level()
 
         self.ssl_verification_enabled = get_setting("ssl_verification_enabled")
         configure_ssl_verification(self.ssl_verification_enabled)
@@ -203,10 +210,12 @@ class WriteLessApp(rumps.App):
                 notifications_enabled=self.notifications_enabled,
                 ssl_verification_enabled=self.ssl_verification_enabled,
                 current_model=self.current_model,
+                debug_logging=self.debug_logging,
                 on_hotkey_change=self._on_hotkey_change,
                 on_notifications_change=self._on_notifications_change,
                 on_ssl_change=self._on_ssl_change,
                 on_model_change=self._on_model_change,
+                on_debug_logging_change=self._on_debug_logging_change,
             )
         else:
             self._settings_window.update_state(
@@ -214,6 +223,7 @@ class WriteLessApp(rumps.App):
                 self.ssl_verification_enabled,
                 self.current_hotkey,
                 self.current_model,
+                self.debug_logging,
             )
         self._settings_window.show()
 
@@ -241,6 +251,16 @@ class WriteLessApp(rumps.App):
         set_setting("ssl_verification_enabled", enabled)
         configure_ssl_verification(enabled)
         self.recorder.ssl_verification_enabled = enabled
+
+    def _on_debug_logging_change(self, enabled: bool) -> None:
+        logger.info("Debug logging changed: %s", enabled)
+        self.debug_logging = enabled
+        set_setting("debug_logging", enabled)
+        self._apply_log_level()
+
+    def _apply_log_level(self) -> None:
+        level = logging.DEBUG if self.debug_logging else logging.INFO
+        logging.getLogger(_APP_LOGGER_NAME).setLevel(level)
 
     def clear_model_cache(self, _sender=None):
         """Delete the cached Whisper model so it will be re-downloaded."""
@@ -348,8 +368,22 @@ class WriteLessApp(rumps.App):
                 self.notifications_enabled,
             )
 
+    def _on_quit(self):
+        logger.info("Write Less shutting down")
+        self.recorder.cleanup()
+
     def run(self, **kwargs):
         logger.info("Write Less starting")
+
+        rumps.events.before_quit.register(self._on_quit)
+        atexit.register(self.recorder.cleanup)
+
+        def _sigterm_handler(signum, frame):
+            self.recorder.cleanup()
+            raise SystemExit(0)
+
+        signal.signal(signal.SIGTERM, _sigterm_handler)
+
         try:
             status = get_permission_status()
             self._setup_hotkey()

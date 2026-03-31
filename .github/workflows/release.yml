@@ -5,16 +5,37 @@ on:
     tags:
       - 'v*'
 
+env:
+  HOMEBREW_TAP_BASE_BRANCH: ${{ vars.HOMEBREW_TAP_BASE_BRANCH != '' && vars.HOMEBREW_TAP_BASE_BRANCH || 'main' }}
+
 jobs:
-  build:
+  build-release:
     runs-on: macos-latest
     permissions:
       contents: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      sha256: ${{ steps.sha.outputs.sha256 }}
+      changelog: ${{ steps.changelog.outputs.changelog }}
 
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Validate Homebrew tap configuration
+        env:
+          HOMEBREW_TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO }}
+          HOMEBREW_TAP_PAT: ${{ secrets.HOMEBREW_TAP_PAT }}
+        run: |
+          test -n "$HOMEBREW_TAP_REPO" || {
+            echo "Repository variable HOMEBREW_TAP_REPO is required." >&2
+            exit 1
+          }
+          test -n "$HOMEBREW_TAP_PAT" || {
+            echo "Secret HOMEBREW_TAP_PAT is required." >&2
+            exit 1
+          }
 
       - name: Set up Python 3.14
         uses: actions/setup-python@v5
@@ -87,6 +108,12 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts
+          path: build/dist/WriteLess-${{ steps.version.outputs.version }}.zip
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -97,7 +124,7 @@ jobs:
             ${{ steps.changelog.outputs.changelog }}
             ### Install via Homebrew
             ```
-            brew tap romus/writeless
+            brew tap ${{ vars.HOMEBREW_TAP_REPO }}
             brew install --cask writeless
             ```
 
@@ -107,3 +134,99 @@ jobs:
             ```
           draft: false
           prerelease: false
+
+  brew-smoke-test:
+    runs-on: macos-latest
+    needs: build-release
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts
+          path: dist
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      - name: Generate local Homebrew cask
+        env:
+          VERSION: ${{ needs.build-release.outputs.version }}
+          SHA256: ${{ needs.build-release.outputs.sha256 }}
+        run: |
+          python3 scripts/render_homebrew_cask.py \
+            --version "$VERSION" \
+            --url "file://${GITHUB_WORKSPACE}/dist/WriteLess-${VERSION}.zip" \
+            --sha256 "$SHA256" \
+            --homepage "${GITHUB_SERVER_URL}/${{ github.repository }}" \
+            --output "${RUNNER_TEMP}/writeless.rb"
+
+      - name: Create temporary Homebrew tap
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: |
+          brew tap-new local/writeless
+          TAP_DIR="$(brew --repository)/Library/Taps/local/homebrew-writeless"
+          mkdir -p "${TAP_DIR}/Casks"
+          cp "${RUNNER_TEMP}/writeless.rb" "${TAP_DIR}/Casks/writeless.rb"
+
+      - name: Install cask from temporary tap
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: brew install --cask local/writeless/writeless
+
+      - name: Verify installed app
+        run: test -d "/Applications/Write Less.app"
+
+  update-homebrew-cask:
+    runs-on: ubuntu-latest
+    needs:
+      - build-release
+      - brew-smoke-test
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout tap repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.HOMEBREW_TAP_REPO }}
+          token: ${{ secrets.HOMEBREW_TAP_PAT }}
+          ref: ${{ env.HOMEBREW_TAP_BASE_BRANCH }}
+          path: homebrew-tap
+
+      - name: Render cask for release
+        env:
+          VERSION: ${{ needs.build-release.outputs.version }}
+          SHA256: ${{ needs.build-release.outputs.sha256 }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          python3 scripts/render_homebrew_cask.py \
+            --version "$VERSION" \
+            --sha256 "$SHA256" \
+            --homepage "${GITHUB_SERVER_URL}/${REPOSITORY}" \
+            --output "homebrew-tap/Casks/writeless.rb"
+
+      - name: Create pull request in tap repository
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.HOMEBREW_TAP_PAT }}
+          path: homebrew-tap
+          branch: release/writeless-v${{ needs.build-release.outputs.version }}
+          base: ${{ env.HOMEBREW_TAP_BASE_BRANCH }}
+          commit-message: |
+            chore: update writeless cask to v${{ needs.build-release.outputs.version }}
+          title: |
+            chore: update writeless cask to v${{ needs.build-release.outputs.version }}
+          body: |
+            Update Homebrew cask for Write Less v${{ needs.build-release.outputs.version }}.
+
+            - Source: ${{ github.server_url }}/${{ github.repository }}/releases/download/v${{ needs.build-release.outputs.version }}/WriteLess-${{ needs.build-release.outputs.version }}.zip
+            - SHA256: `${{ needs.build-release.outputs.sha256 }}`
+          add-paths: |
+            Casks/writeless.rb
