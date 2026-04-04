@@ -2,7 +2,10 @@
 
 import atexit
 import logging
+import os
 import signal
+import threading
+import time
 
 import rumps
 
@@ -379,6 +382,11 @@ class WriteLessApp(rumps.App):
         atexit.register(self.recorder.cleanup)
 
         def _sigterm_handler(signum, frame):
+            # Hard exit fallback — if cleanup deadlocks, force-kill after 3s.
+            def _force_exit():
+                time.sleep(3)
+                os._exit(1)
+            threading.Thread(target=_force_exit, daemon=True).start()
             self.recorder.cleanup()
             raise SystemExit(0)
 
