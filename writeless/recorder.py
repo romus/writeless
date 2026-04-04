@@ -162,29 +162,40 @@ class Recorder:
         return self._model is not None
 
     def cleanup(self) -> None:
-        """Release all audio resources. Safe to call multiple times."""
+        """Release all audio resources. Safe to call multiple times.
+
+        Runs stream teardown in a thread with a hard timeout so it never
+        deadlocks the caller (important for SIGTERM handler).
+        """
         self._recording = False
         stream = self._stream
         self._stream = None
-        if stream is not None:
+
+        def _teardown():
+            if stream is not None:
+                try:
+                    stream.abort()
+                except Exception:
+                    pass
+                try:
+                    stream.close()
+                except Exception:
+                    pass
             try:
-                stream.abort()
+                sd._terminate()
             except Exception:
                 pass
-            try:
-                stream.close()
-            except Exception:
-                pass
+
+        t = threading.Thread(target=_teardown, daemon=True)
+        t.start()
+        t.join(timeout=2.0)
+        if t.is_alive():
+            logger.debug("[cleanup] teardown thread still alive after 2s, giving up")
 
         closer = self._closer_thread
         self._closer_thread = None
         if closer is not None and closer.is_alive():
-            closer.join(timeout=2.0)
-
-        try:
-            sd._terminate()
-        except Exception:
-            pass
+            closer.join(timeout=1.0)
 
     def start(self) -> None:
         """Begin recording audio from the default input device."""
@@ -203,7 +214,7 @@ class Recorder:
         self._closer_thread = None
         if closer is not None and closer.is_alive():
             logger.debug("[stream] waiting for previous closer thread")
-            closer.join(timeout=1.0)
+            closer.join(timeout=2.0)
             if closer.is_alive():
                 logger.debug("[stream] previous closer thread still alive after join")
 
@@ -256,51 +267,26 @@ class Recorder:
         timeout_reached: bool = False,
         timeout_seconds: int | None = None,
     ) -> None:
-        """Stop recording and kick off transcription if audio was captured."""
+        """Stop recording and kick off transcription if audio was captured.
+
+        This method is designed to return immediately so it never blocks the
+        main thread (and therefore the NSRunLoop / UI).  All PortAudio stream
+        teardown happens in a fire-and-forget daemon thread.
+        """
         logger.debug("[stream] stop() called, timeout_reached=%s", timeout_reached)
         self._recording = False
-        if self._stream is not None:
-            stream = self._stream
-            self._stream = None
 
-            def close_stream():
-                t0 = time.monotonic()
-                logger.debug("[stream] close_stream: calling abort()")
-                try:
-                    stream.abort()
-                except Exception:
-                    logger.debug("[stream] abort() failed", exc_info=True)
-                logger.debug("[stream] close_stream: abort() done in %.3fs", time.monotonic() - t0)
-                t1 = time.monotonic()
-                logger.debug("[stream] close_stream: calling close()")
-                try:
-                    stream.close()
-                except Exception:
-                    logger.debug("[stream] close() failed", exc_info=True)
-                logger.debug("[stream] close_stream: close() done in %.3fs", time.monotonic() - t1)
-
-            closer = threading.Thread(target=close_stream, daemon=True)
+        # Grab and detach the stream — teardown happens in background.
+        stream = self._stream
+        self._stream = None
+        if stream is not None:
+            closer = threading.Thread(
+                target=self._close_stream, args=(stream,), daemon=True,
+            )
             self._closer_thread = closer
             closer.start()
-            closer.join(timeout=0.5)
-            if closer.is_alive():
-                logger.debug("[stream] closer thread hung after 0.5s, force-terminating PortAudio")
-                try:
-                    sd._terminate()
-                except Exception:
-                    logger.debug("[stream] sd._terminate() failed", exc_info=True)
-                closer.join(timeout=1.0)
-                if closer.is_alive():
-                    logger.debug("[stream] closer thread STILL alive after sd._terminate()")
-                else:
-                    logger.debug("[stream] closer thread finished after sd._terminate()")
-                try:
-                    sd._initialize()
-                except Exception:
-                    logger.debug("[stream] sd._initialize() failed", exc_info=True)
-            else:
-                logger.debug("[stream] closer thread finished normally")
 
+        # Update UI immediately — no waiting.
         self._on_status_change(IDLE_ICON)
         self._on_recording_stopped()
 
@@ -327,6 +313,51 @@ class Recorder:
 
         self._on_status_change(PROCESSING_ICON)
         threading.Thread(target=self._transcribe, args=(audio,), daemon=True).start()
+
+    def _close_stream(self, stream) -> None:
+        """Close a PortAudio stream with a hung-thread fallback.
+
+        Runs entirely off the main thread.  If abort()/close() hang, falls
+        back to sd._terminate() to unblock them, then re-initialises PortAudio
+        so the next recording session works.
+        """
+        def _abort_and_close():
+            t0 = time.monotonic()
+            logger.debug("[stream] close_stream: calling abort()")
+            try:
+                stream.abort()
+            except Exception:
+                logger.debug("[stream] abort() failed", exc_info=True)
+            logger.debug("[stream] close_stream: abort() done in %.3fs", time.monotonic() - t0)
+            t1 = time.monotonic()
+            logger.debug("[stream] close_stream: calling close()")
+            try:
+                stream.close()
+            except Exception:
+                logger.debug("[stream] close() failed", exc_info=True)
+            logger.debug("[stream] close_stream: close() done in %.3fs", time.monotonic() - t1)
+
+        inner = threading.Thread(target=_abort_and_close, daemon=True)
+        inner.start()
+        inner.join(timeout=0.5)
+
+        if inner.is_alive():
+            logger.debug("[stream] closer thread hung after 0.5s, force-terminating PortAudio")
+            try:
+                sd._terminate()
+            except Exception:
+                logger.debug("[stream] sd._terminate() failed", exc_info=True)
+            inner.join(timeout=1.0)
+            if inner.is_alive():
+                logger.debug("[stream] closer thread STILL alive after sd._terminate()")
+            else:
+                logger.debug("[stream] closer thread finished after sd._terminate()")
+            try:
+                sd._initialize()
+            except Exception:
+                logger.debug("[stream] sd._initialize() failed", exc_info=True)
+        else:
+            logger.debug("[stream] closer thread finished normally")
 
     def _watchdog_loop(self, session_id: int) -> None:
         while True:
