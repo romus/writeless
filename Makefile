@@ -13,7 +13,7 @@ APP_VERSION := $(shell $(PYTHON) -c "import re; print(re.search(r'APP_VERSION\s*
 SYSTEM_PY_VER := $(shell $(PYTHON) --version 2>/dev/null | awk '{print $$2}')
 VENV_PY_VER   := $(shell [ -x "$(VENV_BIN)/python3" ] && $(VENV_BIN)/python3 --version 2>/dev/null | awk '{print $$2}' || echo "none")
 
-.PHONY: help setup run build dmg zip clean version
+.PHONY: help setup setup-dev run test build dmg zip clean version
 
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -31,8 +31,19 @@ setup: ## Create/refresh venv and install dependencies
 	@echo "==> Installing dependencies..."
 	@$(VENV_BIN)/pip install -r requirements.txt
 
+setup-dev: ## Install dev dependencies (tests)
+	@if [ ! -d "$(VENV)" ]; then \
+		echo "==> Creating virtual environment..."; \
+		$(PYTHON) -m venv "$(VENV)"; \
+	fi
+	@echo "==> Installing dev dependencies..."
+	@$(VENV_BIN)/pip install -r requirements-dev.txt
+
 run: setup ## Run app in development mode
 	$(VENV_BIN)/python3 app.py
+
+test: setup-dev ## Run unit tests
+	$(VENV_BIN)/python3 -m pytest
 
 build: setup ## Build Write Less.app
 	@echo "==> Building $(APP_NAME) v$(APP_VERSION)"

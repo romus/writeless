@@ -198,7 +198,12 @@ class Recorder:
             closer.join(timeout=1.0)
 
     def start(self) -> None:
-        """Begin recording audio from the default input device."""
+        """Begin recording audio from the default input device.
+
+        Only lightweight state/UI updates happen here (main thread).
+        All blocking PortAudio work runs in a background thread so the
+        NSRunLoop is never stalled.
+        """
         self._audio_frames = []
         self._recording = True
         self._session_id += 1
@@ -207,16 +212,36 @@ class Recorder:
         self._last_frame_at = time.monotonic()
         self._on_status_change(RECORDING_ICON)
 
+        threading.Thread(
+            target=self._open_stream,
+            args=(session_id,),
+            daemon=True,
+        ).start()
+
+    def _open_stream(self, session_id: int) -> None:
+        """Open the audio stream off the main thread.
+
+        Waits for any previous closer thread, reinitialises PortAudio,
+        and opens the InputStream.  All of these can block on flaky audio
+        devices, so they must never run on the main thread.
+        """
+        # Bail out if a newer session already superseded us.
+        if self._session_id != session_id:
+            return
+
         # Wait for any in-flight stream close from a previous session before
-        # reinitialising PortAudio. Without this, sd._terminate() could race
-        # with the closer thread that is still calling stream.stop().
+        # reinitialising PortAudio.  Without this, sd._terminate() races with
+        # the closer thread that is still calling stream.abort()/close().
         closer = self._closer_thread
         self._closer_thread = None
         if closer is not None and closer.is_alive():
             logger.debug("[stream] waiting for previous closer thread")
-            closer.join(timeout=2.0)
+            closer.join(timeout=3.0)
             if closer.is_alive():
                 logger.debug("[stream] previous closer thread still alive after join")
+
+        if self._session_id != session_id:
+            return
 
         # Re-initialise PortAudio so it picks up the current system default
         # device. PortAudio caches device info at startup; without this, any
@@ -229,6 +254,9 @@ class Recorder:
         except Exception:
             logger.debug("[stream] PortAudio reinit failed", exc_info=True)
         update_audio_device_cache()
+
+        if self._session_id != session_id:
+            return
 
         def audio_callback(indata, frames, time_info, status):
             del frames, time_info, status
