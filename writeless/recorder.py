@@ -135,11 +135,13 @@ class Recorder:
         on_notify: Callable[[str], None],
         on_recording_stopped: Callable[[], None],
         dispatch_to_main: Callable[[Callable], None],
+        on_transcription_success: Callable[[], None] | None = None,
     ):
         self._on_status_change = on_status_change
         self._on_notify = on_notify
         self._on_recording_stopped = on_recording_stopped
         self._dispatch_to_main = dispatch_to_main
+        self._on_transcription_success = on_transcription_success
 
         self._recording = False
         self._audio_frames: list[np.ndarray] = []
@@ -496,6 +498,8 @@ class Recorder:
                 copied = copy_to_clipboard(text)
                 if copied:
                     self._on_notify("Recognized and copied to clipboard.")
+                    if self._on_transcription_success is not None:
+                        self._on_transcription_success()
                 else:
                     self._on_notify("Recognized, but failed to copy to clipboard.")
             else:

@@ -4,6 +4,7 @@ import json
 import os
 
 import writeless.settings as settings
+from writeless.constants import DEFAULT_COMPLETION_SOUND
 
 
 class TestDefaults:
@@ -12,10 +13,14 @@ class TestDefaults:
         assert settings.get("hotkey") == "<cmd>+<alt>+<f8>"
         assert settings.get("whisper_model") == "small"
         assert settings.get("debug_logging") is False
+        assert settings.get("completion_sound") == "Glass"
 
     def test_all_default_keys_present(self, tmp_settings):
         for key in settings._DEFAULTS:
             assert settings.get(key) == settings._DEFAULTS[key]
+
+    def test_completion_sound_default_matches_constant(self, tmp_settings):
+        assert settings._DEFAULTS["completion_sound"] == DEFAULT_COMPLETION_SOUND
 
 
 class TestSetAndGet:

@@ -53,12 +53,12 @@ make help
 - **`app.py`** — 3-line entrypoint. Creates and runs `WriteLessApp`.
 - **`writeless/menubar_app.py`** — Main controller (`rumps.App` subclass). Manages lifecycle, hotkey registration via NSEvent, permission polling (every 3s), and delegates recording to `Recorder`.
 - **`writeless/recorder.py`** — Audio I/O and transcription. Opens `sounddevice` stream, runs a watchdog thread (10s timeout before first audio, 25s after), transcribes in a background thread using cached Whisper model, calls back into the app via callbacks (never touches UI directly).
-- **`writeless/settings_window.py`** — Native macOS settings UI built with PyObjC/AppKit. Custom `HotkeyField` captures key combos via `keyDown_`, `NSPopUpButton` for Whisper model selection. Window hides on close instead of being destroyed.
-- **`writeless/system_services.py`** — macOS integration: permission checks (ctypes into ApplicationServices), notifications (UNUserNotificationCenter), clipboard (pbcopy), icon resolution.
+- **`writeless/settings_window.py`** — Native macOS settings UI built with PyObjC/AppKit. Custom `HotkeyField` captures key combos via `keyDown_`, `NSPopUpButton`s for Whisper model and completion sound selection. Window hides on close instead of being destroyed.
+- **`writeless/system_services.py`** — macOS integration: permission checks (ctypes into ApplicationServices), notifications (UNUserNotificationCenter), clipboard (pbcopy), completion sound (`NSSound`), icon resolution.
 - **`writeless/hotkey_utils.py`** — Bidirectional conversion between pynput format (`<cmd>+<alt>+<f8>`), display format (`⌥⌘F8`), and NSEvent keyCode/modifier masks.
 - **`writeless/diagnostics.py`** — Audio device probing and diagnostic info formatting for the "Diagnostics" menu item.
 - **`writeless/settings.py`** — Persistent JSON settings in `~/Library/Application Support/dev.romus.app.writeless/settings.json`.
-- **`writeless/constants.py`** — Shared constants: menubar icon chars, timeouts, default hotkey, available Whisper model list (`WHISPER_MODELS`).
+- **`writeless/constants.py`** — Shared constants: menubar icon chars, timeouts, default hotkey, available Whisper model list (`WHISPER_MODELS`), completion sound list (`COMPLETION_SOUNDS`).
 
 ### Recording Data Flow
 
@@ -69,7 +69,7 @@ make help
 5. Audio concatenated → `_transcribe()` in background thread
 6. Whisper model loads lazily on first use (downloaded to `~/.cache/huggingface/hub/`)
 7. Transcription copied to clipboard via `pbcopy`
-8. Callbacks update menubar icon and trigger system notification
+8. Callbacks update menubar icon, trigger system notification, and (on success only) play the completion sound
 9. All UI updates dispatched to main thread via `AppHelper.callAfter()`
 
 ### Key Design Decisions
@@ -80,6 +80,7 @@ make help
 - **Settings as JSON** (not NSUserDefaults): simpler, human-readable, inspectable
 - **Callbacks-only from Recorder**: keeps audio/transcription code decoupled from UI
 - **Whisper model selectable** via Settings UI; stored in `settings.json` as `whisper_model`, default `"small"`; cached in `~/.cache/huggingface/hub/`
+- **Completion sound** via `NSSound.soundNamed_` (macOS system sounds, nothing bundled); stored in `settings.json` as `completion_sound` (`"off"` disables), default `"Glass"`; independent of the Notifications toggle; `Recorder` only exposes the `on_transcription_success` callback and the app plays the sound on the main thread
 - **Thread safety**: `Recorder._lock` guards audio frame list; all UI mutations go through `AppHelper.callAfter()` to reach the main thread
 
 ## Versioning & Release

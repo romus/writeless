@@ -1,4 +1,4 @@
-"""System-level helpers for notifications, clipboard, and permissions."""
+"""System-level helpers for notifications, clipboard, sounds, and permissions."""
 
 import ctypes
 import ctypes.util
@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import rumps
+
+from writeless.constants import COMPLETION_SOUND_OFF
 
 
 @dataclass(frozen=True)
@@ -267,3 +269,28 @@ def show_alert(title: str, message: str) -> None:
         alert.runModal()
     except Exception:
         rumps.alert(title, message)
+
+
+# Reference to the sound most recently started. Lets the next call stop it
+# (NSSound.play returns NO while the same instance is still playing) and
+# keeps the object alive for the duration of playback.
+_current_sound = None
+
+
+def play_system_sound(name: str) -> bool:
+    """Play a named macOS system sound (e.g. "Glass"). Returns True if playback started."""
+    global _current_sound
+    if not name or name == COMPLETION_SOUND_OFF:
+        return False
+    try:
+        from AppKit import NSSound
+
+        sound = NSSound.soundNamed_(name)
+        if sound is None:
+            return False
+        if _current_sound is not None:
+            _current_sound.stop()
+        _current_sound = sound
+        return bool(sound.play())
+    except Exception:
+        return False
