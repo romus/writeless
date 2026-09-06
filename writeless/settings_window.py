@@ -4,7 +4,7 @@ import AppKit
 import objc
 from Foundation import NSObject, NSMakeRect
 
-from writeless.constants import WHISPER_MODELS
+from writeless.constants import COMPLETION_SOUNDS, DEFAULT_COMPLETION_SOUND, WHISPER_MODELS
 from writeless.hotkey_utils import (
     ns_event_to_pynput,
     pynput_to_display,
@@ -15,6 +15,13 @@ _ROW_HEIGHT = 36
 _PADDING = 20
 _LABEL_WIDTH = 180
 _FIELD_HEIGHT = 28
+
+
+def _completion_sound_index(sound_id: str) -> int:
+    """Popup index for a completion-sound id; unknown ids fall back to the default."""
+    ids = [sid for sid, _ in COMPLETION_SOUNDS]
+    return ids.index(sound_id) if sound_id in ids else ids.index(DEFAULT_COMPLETION_SOUND)
+
 
 # ── Hotkey capture field ─────────────────────────────────────────────────────
 
@@ -144,6 +151,13 @@ class _ActionTarget(NSObject):
             model_id = WHISPER_MODELS[index][0]
             self._callbacks["model_changed"](model_id)
 
+    @objc.IBAction
+    def soundChanged_(self, sender):
+        if "sound_changed" in self._callbacks:
+            index = sender.indexOfSelectedItem()
+            sound_id = COMPLETION_SOUNDS[index][0]
+            self._callbacks["sound_changed"](sound_id)
+
 
 # ── Window delegate ──────────────────────────────────────────────────────────
 
@@ -169,11 +183,13 @@ class SettingsWindow:
         ssl_verification_enabled: bool,
         current_model: str = "small",
         debug_logging: bool = False,
+        completion_sound: str = DEFAULT_COMPLETION_SOUND,
         on_hotkey_change=None,
         on_notifications_change=None,
         on_ssl_change=None,
         on_model_change=None,
         on_debug_logging_change=None,
+        on_completion_sound_change=None,
     ):
         self._on_hotkey_change = on_hotkey_change
 
@@ -183,9 +199,10 @@ class SettingsWindow:
             "ssl_toggled": on_ssl_change,
             "debug_toggled": on_debug_logging_change,
             "model_changed": on_model_change,
+            "sound_changed": on_completion_sound_change,
         })
 
-        num_rows = 5
+        num_rows = 6
         content_height = _PADDING * 2 + num_rows * _ROW_HEIGHT + (num_rows - 1) * 8
         frame = NSMakeRect(0, 0, _WINDOW_WIDTH, content_height)
 
@@ -229,7 +246,19 @@ class SettingsWindow:
 
         y -= _ROW_HEIGHT + 8
 
-        # Row 3: SSL Verification
+        # Row 3: Completion Sound
+        self._add_label(content, "Completion Sound", y)
+        self._sound_popup = self._add_popup(
+            content,
+            y,
+            [label for _, label in COMPLETION_SOUNDS],
+            _completion_sound_index(completion_sound),
+            b"soundChanged:",
+        )
+
+        y -= _ROW_HEIGHT + 8
+
+        # Row 4: SSL Verification
         self._add_label(content, "SSL Verification", y)
         self._ssl_switch = self._add_switch(
             content, y, ssl_verification_enabled, b"sslToggled:"
@@ -237,30 +266,23 @@ class SettingsWindow:
 
         y -= _ROW_HEIGHT + 8
 
-        # Row 4: Whisper Model
+        # Row 5: Whisper Model
         self._add_label(content, "Whisper Model", y)
-        field_x = _LABEL_WIDTH + _PADDING
-        field_width = _WINDOW_WIDTH - field_x - _PADDING
-        self._model_popup = AppKit.NSPopUpButton.alloc().initWithFrame_pullsDown_(
-            NSMakeRect(field_x, y + 2, field_width, _FIELD_HEIGHT),
-            False,
-        )
-        for _model_id, label in WHISPER_MODELS:
-            self._model_popup.addItemWithTitle_(label)
         current_index = next(
             (i for i, (mid, _) in enumerate(WHISPER_MODELS) if mid == current_model),
             2,  # fallback to "small" index
         )
-        self._model_popup.selectItemAtIndex_(current_index)
-        self._model_popup.setTarget_(self._target)
-        self._model_popup.setAction_(b"modelChanged:")
-        font = AppKit.NSFont.systemFontOfSize_(13)
-        self._model_popup.setFont_(font)
-        content.addSubview_(self._model_popup)
+        self._model_popup = self._add_popup(
+            content,
+            y,
+            [label for _, label in WHISPER_MODELS],
+            current_index,
+            b"modelChanged:",
+        )
 
         y -= _ROW_HEIGHT + 8
 
-        # Row 5: Debug Logging
+        # Row 6: Debug Logging
         self._add_label(content, "Debug Logging", y)
         self._debug_switch = self._add_switch(
             content, y, debug_logging, b"debugToggled:"
@@ -283,6 +305,23 @@ class SettingsWindow:
         parent.addSubview_(switch)
         return switch
 
+    def _add_popup(self, parent, y, titles, selected_index, action_sel):
+        field_x = _LABEL_WIDTH + _PADDING
+        field_width = _WINDOW_WIDTH - field_x - _PADDING
+        popup = AppKit.NSPopUpButton.alloc().initWithFrame_pullsDown_(
+            NSMakeRect(field_x, y + 2, field_width, _FIELD_HEIGHT),
+            False,
+        )
+        for title in titles:
+            popup.addItemWithTitle_(title)
+        popup.selectItemAtIndex_(selected_index)
+        popup.setTarget_(self._target)
+        popup.setAction_(action_sel)
+        font = AppKit.NSFont.systemFontOfSize_(13)
+        popup.setFont_(font)
+        parent.addSubview_(popup)
+        return popup
+
     def _hotkey_changed(self, pynput_str):
         if self._on_hotkey_change:
             self._on_hotkey_change(pynput_str)
@@ -291,7 +330,15 @@ class SettingsWindow:
         self._window.makeKeyAndOrderFront_(None)
         AppKit.NSApp().activateIgnoringOtherApps_(True)
 
-    def update_state(self, notifications_enabled, ssl_verification_enabled, current_hotkey, current_model, debug_logging=False):
+    def update_state(
+        self,
+        notifications_enabled,
+        ssl_verification_enabled,
+        current_hotkey,
+        current_model,
+        debug_logging=False,
+        completion_sound=DEFAULT_COMPLETION_SOUND,
+    ):
         """Refresh UI to match current app state (called when re-showing)."""
         self._hotkey_field.set_hotkey(current_hotkey)
         self._notif_switch.setState_(
@@ -308,3 +355,4 @@ class SettingsWindow:
             2,
         )
         self._model_popup.selectItemAtIndex_(current_index)
+        self._sound_popup.selectItemAtIndex_(_completion_sound_index(completion_sound))

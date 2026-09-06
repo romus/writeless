@@ -14,6 +14,7 @@ _DEFAULTS = {
     "hotkey": "<cmd>+<alt>+<f8>",
     "whisper_model": "small",
     "debug_logging": False,
+    "completion_sound": "Glass",
 }
 
 

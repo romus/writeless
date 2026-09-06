@@ -13,7 +13,7 @@ _APP_LOGGER_NAME = "writeless"
 
 logger = logging.getLogger(__name__)
 
-from writeless.constants import IDLE_ICON
+from writeless.constants import COMPLETION_SOUNDS, DEFAULT_COMPLETION_SOUND, IDLE_ICON
 from writeless.diagnostics import format_diagnostics_text, update_audio_device_cache
 from writeless.hotkey_utils import pynput_to_display, pynput_to_ns_key_equivalent
 from writeless.recorder import Recorder, clear_model_cache, configure_ssl_verification
@@ -23,6 +23,7 @@ from writeless.system_services import (
     get_permission_status,
     notify_user,
     open_settings_url,
+    play_system_sound,
     request_notification_permission,
     set_app_icon,
     show_alert,
@@ -43,12 +44,16 @@ class WriteLessApp(rumps.App):
         self.notifications_enabled = get_setting("notifications_enabled")
         self.current_hotkey = get_setting("hotkey")
         self.current_model = get_setting("whisper_model")
+        self.completion_sound = get_setting("completion_sound")
+        if self.completion_sound not in {sid for sid, _ in COMPLETION_SOUNDS}:
+            self.completion_sound = DEFAULT_COMPLETION_SOUND  # hand-edited settings.json
 
         self.recorder = Recorder(
             on_status_change=self._set_status,
             on_notify=self._notify,
             on_recording_stopped=self._on_recording_stopped,
             dispatch_to_main=self._dispatch_to_main,
+            on_transcription_success=self._on_transcription_success,
         )
         self.recorder.ssl_verification_enabled = self.ssl_verification_enabled
         self.recorder.model_name = self.current_model
@@ -70,6 +75,10 @@ class WriteLessApp(rumps.App):
 
     def _on_recording_stopped(self) -> None:
         self.record_item.title = "Record"
+
+    def _on_transcription_success(self) -> None:
+        # Called on the transcription thread; NSSound is AppKit, so hop to main.
+        self._dispatch_to_main(lambda: play_system_sound(self.completion_sound))
 
     @staticmethod
     def _dispatch_to_main(fn) -> None:
@@ -214,19 +223,22 @@ class WriteLessApp(rumps.App):
                 ssl_verification_enabled=self.ssl_verification_enabled,
                 current_model=self.current_model,
                 debug_logging=self.debug_logging,
+                completion_sound=self.completion_sound,
                 on_hotkey_change=self._on_hotkey_change,
                 on_notifications_change=self._on_notifications_change,
                 on_ssl_change=self._on_ssl_change,
                 on_model_change=self._on_model_change,
                 on_debug_logging_change=self._on_debug_logging_change,
+                on_completion_sound_change=self._on_completion_sound_change,
             )
         else:
             self._settings_window.update_state(
-                self.notifications_enabled,
-                self.ssl_verification_enabled,
-                self.current_hotkey,
-                self.current_model,
-                self.debug_logging,
+                notifications_enabled=self.notifications_enabled,
+                ssl_verification_enabled=self.ssl_verification_enabled,
+                current_hotkey=self.current_hotkey,
+                current_model=self.current_model,
+                debug_logging=self.debug_logging,
+                completion_sound=self.completion_sound,
             )
         self._settings_window.show()
 
@@ -240,6 +252,12 @@ class WriteLessApp(rumps.App):
     def _on_notifications_change(self, enabled: bool) -> None:
         self.notifications_enabled = enabled
         set_setting("notifications_enabled", enabled)
+
+    def _on_completion_sound_change(self, sound_id: str) -> None:
+        logger.info("Completion sound changed: %s", sound_id)
+        self.completion_sound = sound_id
+        set_setting("completion_sound", sound_id)
+        play_system_sound(sound_id)  # preview; AppKit action, already on main thread
 
     def _on_model_change(self, model_id: str) -> None:
         logger.info("Whisper model changed: %s", model_id)

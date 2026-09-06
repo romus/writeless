@@ -2,6 +2,7 @@
 
 import threading
 import time
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch, PropertyMock
 
 import numpy as np
@@ -38,6 +39,72 @@ class TestRecorderInit:
     def test_ssl_verification_default(self):
         rec = _make_recorder()
         assert rec.ssl_verification_enabled is True
+
+    def test_transcription_success_callback_default_none(self):
+        rec = _make_recorder()
+        assert rec._on_transcription_success is None
+
+
+class TestTranscribeCallbacks:
+    """Run _transcribe synchronously with a pre-loaded (mocked) Whisper model."""
+
+    def _recorder_with_model(self, text, **overrides):
+        rec = _make_recorder(**overrides)
+        rec._model = MagicMock()
+        rec._model.transcribe.return_value = ([SimpleNamespace(text=text)], None)
+        return rec
+
+    @patch("writeless.recorder.copy_to_clipboard", return_value=True)
+    def test_success_calls_callback_once(self, _copy):
+        on_success = MagicMock()
+        rec = self._recorder_with_model("hello", on_transcription_success=on_success)
+
+        rec._transcribe(np.zeros(160, dtype=np.float32))
+
+        on_success.assert_called_once_with()
+        rec._on_notify.assert_called_with("Recognized and copied to clipboard.")
+        rec._on_status_change.assert_called_with(IDLE_ICON)
+
+    @patch("writeless.recorder.copy_to_clipboard", return_value=True)
+    def test_empty_text_does_not_call_callback(self, copy_mock):
+        on_success = MagicMock()
+        rec = self._recorder_with_model("   ", on_transcription_success=on_success)
+
+        rec._transcribe(np.zeros(160, dtype=np.float32))
+
+        on_success.assert_not_called()
+        copy_mock.assert_not_called()
+        rec._on_notify.assert_called_with("No speech detected.")
+
+    @patch("writeless.recorder.copy_to_clipboard", return_value=False)
+    def test_clipboard_failure_does_not_call_callback(self, _copy):
+        on_success = MagicMock()
+        rec = self._recorder_with_model("hello", on_transcription_success=on_success)
+
+        rec._transcribe(np.zeros(160, dtype=np.float32))
+
+        on_success.assert_not_called()
+        rec._on_notify.assert_called_with("Recognized, but failed to copy to clipboard.")
+
+    @patch("writeless.recorder.copy_to_clipboard", return_value=True)
+    def test_transcription_error_does_not_call_callback(self, _copy):
+        on_success = MagicMock()
+        rec = self._recorder_with_model("hello", on_transcription_success=on_success)
+        rec._model.transcribe.side_effect = RuntimeError("boom")
+
+        rec._transcribe(np.zeros(160, dtype=np.float32))
+
+        on_success.assert_not_called()
+        rec._on_status_change.assert_called_with(IDLE_ICON)
+        assert rec._on_notify.call_args[0][0].startswith("Error:")
+
+    @patch("writeless.recorder.copy_to_clipboard", return_value=True)
+    def test_success_without_callback_does_not_raise(self, _copy):
+        rec = self._recorder_with_model("hello")
+
+        rec._transcribe(np.zeros(160, dtype=np.float32))
+
+        rec._on_notify.assert_called_with("Recognized and copied to clipboard.")
 
 
 class TestStartStop:
