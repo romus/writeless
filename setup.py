@@ -29,7 +29,9 @@ OPTIONS = {
     'packages': ['writeless', 'rumps', 'sounddevice', '_sounddevice_data',
                  'faster_whisper', 'ctranslate2', 'numpy', 'pynput', 'certifi'],
     'excludes': ['torch', 'torchgen', 'scipy', 'sympy', 'numba',
-                 'onnxruntime', 'torchaudio', 'torchvision'],
+                 'onnxruntime', 'torchaudio', 'torchvision',
+                 # python.org builds ship Tcl/Tk frameworks whose .a stubs make codesign fail
+                 'tkinter', '_tkinter'],
     'plist': {
         'CFBundleName': 'Write Less',
         'CFBundleDisplayName': 'Write Less',
