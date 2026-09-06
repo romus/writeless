@@ -1,6 +1,7 @@
 .DEFAULT_GOAL := help
 
-PYTHON      := python3
+# Prefer Homebrew Python 3.14 (required, see CLAUDE.md); fall back to python3 on PATH.
+PYTHON      ?= $(shell command -v python3.14 2>/dev/null || echo python3)
 VENV        := .venv
 VENV_BIN    := $(VENV)/bin
 APP_NAME    := Write Less
