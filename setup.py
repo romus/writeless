@@ -1,25 +1,23 @@
-import os
-import shutil
 import subprocess
 import sys
 
 sys.setrecursionlimit(5000)
 
-# macOS Sequoia+ adds com.apple.provenance to copied files, which prevents
-# py2app/macholib from modifying Mach-O headers. Strip xattrs and ad-hoc
-# signatures after each copy so the build can proceed.
-_orig_copy2 = shutil.copy2
+# macOS Sequoia+ tags copied files with com.apple.provenance, which blocks
+# codesign from touching them, and py2app's real file copies never go
+# through shutil.copy2 — so strip xattrs/signatures right where py2app
+# actually signs (codesign_adhoc) instead of trying to catch every copy.
+import py2app.util
 
-def _copy2_strip_provenance(src, dst, **kwargs):
-    result = _orig_copy2(src, dst, **kwargs)
-    dest = dst if not os.path.isdir(dst) else os.path.join(dst, os.path.basename(src))
-    dest_str = os.fsdecode(dest)
-    if dest_str.endswith(('.so', '.dylib')):
-        subprocess.run(['xattr', '-c', dest], capture_output=True)
-        subprocess.run(['codesign', '--remove-signature', dest], capture_output=True)
-    return result
+_orig_codesign_adhoc = py2app.util.codesign_adhoc
 
-shutil.copy2 = _copy2_strip_provenance
+def _codesign_adhoc_strip_provenance(bundle):
+    for file in py2app.util._macho_find(bundle):
+        subprocess.run(['xattr', '-c', file], capture_output=True)
+        subprocess.run(['codesign', '--remove-signature', file], capture_output=True)
+    _orig_codesign_adhoc(bundle)
+
+py2app.util.codesign_adhoc = _codesign_adhoc_strip_provenance
 
 from setuptools import setup
 from writeless.constants import APP_VERSION
